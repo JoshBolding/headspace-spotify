@@ -539,21 +539,22 @@
         transform-origin: center;
       }
       .lb-tab-icon[data-tab="liked"]::before {
-        left: 2px;
-        top: 3px;
-        width: 9px;
-        height: 9px;
+        left: 3px;
+        top: 5px;
+        width: 8px;
+        height: 7px;
         background: currentColor;
         transform: rotate(45deg);
-        border-radius: 2px;
+        border-radius: 0 0 2px 0;
       }
       .lb-tab-icon[data-tab="liked"]::after {
-        left: 1px;
-        top: 1px;
-        width: 11px;
-        height: 7px;
-        background: rgba(6, 22, 0, 0.35);
-        border-radius: 0 0 7px 7px;
+        left: 2px;
+        top: 2px;
+        width: 10px;
+        height: 8px;
+        background:
+          radial-gradient(circle at 30% 38%, currentColor 0 32%, transparent 34%),
+          radial-gradient(circle at 70% 38%, currentColor 0 32%, transparent 34%);
       }
       .lb-tab-icon[data-tab="playlists"]::before {
         left: 1px;
