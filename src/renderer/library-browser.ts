@@ -20,6 +20,8 @@ interface LibraryItem {
   contextUri?: string;
 }
 
+export type QueuedLibraryItem = Readonly<LibraryItem>;
+
 const TAB_ORDER: Tab[] = ["search", "liked", "playlists", "recent"];
 const TAB_TITLES: Record<Tab, string> = {
   search: "Search",
@@ -43,15 +45,20 @@ export class LibraryBrowser {
   private inputEl: HTMLInputElement;
   private listEl: HTMLDivElement;
   private renderSettings?: (container: HTMLElement) => void | Promise<void>;
+  private onQueued?: (item: QueuedLibraryItem) => void;
 
   constructor(
     container: HTMLElement,
     controller: SpotifyController,
-    opts: { renderSettings?: (container: HTMLElement) => void | Promise<void> } = {},
+    opts: {
+      renderSettings?: (container: HTMLElement) => void | Promise<void>;
+      onQueued?: (item: QueuedLibraryItem) => void;
+    } = {},
   ) {
     this.container = container;
     this.controller = controller;
     this.renderSettings = opts.renderSettings;
+    this.onQueued = opts.onQueued;
     container.innerHTML = "";
     container.classList.add("lb-root");
 
@@ -237,6 +244,7 @@ export class LibraryBrowser {
         queueBtn.textContent = "ADD";
         queueBtn.title = "Add to queue";
         queueBtn.addEventListener("click", (e) => {
+          e.preventDefault();
           e.stopPropagation();
           void this.onQueueClick(item, queueBtn);
         });
@@ -274,6 +282,7 @@ export class LibraryBrowser {
     }
     btn.classList.add("lb-queue-ok");
     btn.textContent = "OK";
+    this.onQueued?.(item);
     window.setTimeout(() => {
       btn.disabled = false;
       btn.classList.remove("lb-queue-ok");

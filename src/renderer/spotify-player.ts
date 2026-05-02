@@ -442,6 +442,8 @@ export class SpotifyController {
   async addToQueue(uri: string): Promise<{ ok: true } | { ok: false; error: string }> {
     const deviceId = await this.ensureDeviceId();
     if (!deviceId) return { ok: false, error: "no_device" };
+    await this.ensureSdkIsActive();
+    console.log("[spotify] addToQueue ->", { deviceId, uri });
     const r = await window.headspace.spAddQueue(uri, deviceId);
     if (r && typeof r === "object" && "error" in (r as object)) {
       return { ok: false, error: (r as { error: string }).error };

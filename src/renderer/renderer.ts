@@ -917,6 +917,10 @@ function wireSpotifyAuth(onAuthed: () => void): void {
 
     library = new LibraryBrowser(drawerBody, controller, {
       renderSettings: renderSpotifySettings,
+      onQueued: () => {
+        void queueView.refresh();
+        window.setTimeout(() => void queueView.refresh(), 900);
+      },
     });
     library.setErrorHandler((err) => {
       if (err === "no_device") {
