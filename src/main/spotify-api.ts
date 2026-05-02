@@ -95,8 +95,7 @@ export interface SpotifyPlaylist {
   description?: string;
   images: SpotifyImage[];
   owner: { display_name: string; id: string };
-  tracks: { total: number | null };
-  trackTotal?: number | null;
+  tracks?: { total?: number | null };
 }
 
 export interface SpotifyUser {
@@ -149,58 +148,15 @@ export async function getMyPlaylists(
   limit = 50,
 ): Promise<{ items: LibraryItem[]; total: number; next: boolean }> {
   const res = await call<Paged<SpotifyPlaylist | null>>(
-    `/me/playlists?offset=${offset}&limit=${limit}&fields=items(id,name,uri,images,owner(display_name,id),tracks(total)),total,next,offset,limit`,
-  );
-  const playlists = await Promise.all(
-    res.items
-      .filter((p): p is SpotifyPlaylist => !!p)
-      .map(async (p) => {
-        const trackTotal = await getPlaylistTrackCount(p.id).catch((err) => {
-          console.warn("[spotify] playlist count failed:", p.id, err);
-          return null;
-        });
-        return { ...p, tracks: { total: trackTotal }, trackTotal };
-      }),
+    `/me/playlists?offset=${offset}&limit=${limit}&fields=items(id,name,uri,images,owner(display_name,id)),total,next,offset,limit`,
   );
   return {
-    items: playlists.map((p) => ({ kind: "playlist", playlist: p })),
+    items: res.items
+      .filter((p): p is SpotifyPlaylist => !!p)
+      .map((p) => ({ kind: "playlist", playlist: p })),
     total: res.total,
     next: !!res.next,
   };
-}
-
-export async function getPlaylistTrackCount(playlistId: string): Promise<number> {
-  const detailTotal = await call<{ tracks?: { total?: number } }>(
-    `/playlists/${playlistId}?fields=tracks(total)`,
-  )
-    .then((res) => asTotal(res.tracks?.total))
-    .catch(() => null);
-  if (detailTotal !== null && detailTotal > 0) return detailTotal;
-
-  const pageTotal = await call<{ total?: number }>(
-    `/playlists/${playlistId}/tracks?limit=1&fields=total`,
-  )
-    .then((res) => asTotal(res.total))
-    .catch(() => null);
-  if (pageTotal !== null && pageTotal > 0) return pageTotal;
-
-  let counted = 0;
-  let offset = 0;
-  for (let page = 0; page < 20; page++) {
-    const res = await call<Paged<{ track: SpotifyTrack | null }>>(
-      `/playlists/${playlistId}/tracks?offset=${offset}&limit=100&fields=items(track(id)),next,offset,limit,total`,
-    );
-    counted += res.items.length;
-    if (!res.next) break;
-    offset += res.limit || 100;
-  }
-  if (counted > 0) return counted;
-  return pageTotal ?? detailTotal ?? counted;
-}
-
-function asTotal(value: unknown): number | null {
-  const total = Number(value);
-  return Number.isFinite(total) && total >= 0 ? total : null;
 }
 
 export async function getRecentlyPlayed(
@@ -225,12 +181,23 @@ export async function searchTracks(
   limit = 20,
 ): Promise<{ items: LibraryItem[] }> {
   if (!query.trim()) return { items: [] };
-  const q = encodeURIComponent(query);
+  const params = new URLSearchParams({
+    q: query.trim(),
+    type: "track,playlist",
+    limit: String(limit),
+    market: "from_token",
+  });
   const res = await call<{
-    tracks: Paged<SpotifyTrack>;
-  }>(`/search?q=${q}&type=track&limit=${limit}`);
+    tracks?: Paged<SpotifyTrack>;
+    playlists?: Paged<SpotifyPlaylist | null>;
+  }>(`/search?${params.toString()}`);
   return {
-    items: res.tracks.items.map((t) => ({ kind: "track", track: t })),
+    items: [
+      ...(res.tracks?.items ?? []).map((t) => ({ kind: "track" as const, track: t })),
+      ...(res.playlists?.items ?? [])
+        .filter((p): p is SpotifyPlaylist => !!p)
+        .map((p) => ({ kind: "playlist" as const, playlist: p })),
+    ],
   };
 }
 

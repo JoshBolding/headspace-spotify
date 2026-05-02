@@ -51,7 +51,6 @@ declare global {
       spUser: () => Promise<unknown>;
       spLiked: (offset: number, limit: number) => Promise<unknown>;
       spPlaylists: (offset: number, limit: number) => Promise<unknown>;
-      spPlaylistCount: (playlistId: string) => Promise<unknown>;
       spRecent: (limit: number) => Promise<unknown>;
       spSearch: (query: string, limit: number) => Promise<unknown>;
       spPlaylistTracks: (id: string, offset: number, limit: number) => Promise<unknown>;
@@ -222,7 +221,7 @@ function wireSpotifyAuth(onAuthed: () => void): void {
 
   btn.addEventListener("click", async () => {
     btn.disabled = true;
-    btn.textContent = "Opening browser…";
+    btn.textContent = "Opening browser...";
     status.textContent = "Complete sign-in in your browser, then return here.";
     const result = await window.headspace.authSignIn({ showDialog: true });
     if (!result.success) {
@@ -391,7 +390,7 @@ function wireSpotifyAuth(onAuthed: () => void): void {
     lyricsTrackId = s.track.id;
     currentLyrics = null;
     lastRenderedLineIdx = -2;
-    showLyricsStatus("Loading lyrics…");
+    showLyricsStatus("Loading lyrics...");
     try {
       const res = await window.headspace.getLyrics({
         trackId: s.track.id,
@@ -823,7 +822,7 @@ function wireSpotifyAuth(onAuthed: () => void): void {
   let initialized = false;
 
   async function tryInitController() {
-    nowPlaying.textContent = "Connecting to Spotify…";
+    nowPlaying.textContent = "Connecting to Spotify...";
     const result = await controller.init();
     if (result.mode === "sdk") {
       hideStatus();
@@ -867,7 +866,7 @@ function wireSpotifyAuth(onAuthed: () => void): void {
                   primary: true,
                   onClick: async () => {
                     showStatus(
-                      "Resetting Widevine…",
+                      "Resetting Widevine...",
                       "Clearing cached components and reinstalling. This can take 30–60 seconds.",
                       { durationMs: 0 },
                     );
@@ -877,8 +876,8 @@ function wireSpotifyAuth(onAuthed: () => void): void {
                     };
                     console.log("[headspace] reset result:", r);
                     showStatus(
-                      "Retrying SDK…",
-                      "Component cache rebuilt. Re-initializing playback…",
+                      "Retrying SDK...",
+                      "Component cache rebuilt. Re-initializing playback...",
                       { durationMs: 0 },
                     );
                     await tryInitController();
@@ -892,8 +891,8 @@ function wireSpotifyAuth(onAuthed: () => void): void {
                   primary: true,
                   onClick: async () => {
                     showStatus(
-                      "Retrying…",
-                      "Re-initializing Spotify Web Playback SDK… (up to 15s)",
+                      "Retrying...",
+                      "Re-initializing Spotify Web Playback SDK... (up to 15s)",
                       { durationMs: 0 },
                     );
                     await tryInitController();

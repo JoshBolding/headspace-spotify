@@ -291,7 +291,6 @@ function createWindow() {
   ipcMain.handle("sp:user", wrap(Sp.getCurrentUser));
   ipcMain.handle("sp:liked", wrap(Sp.getLikedTracks));
   ipcMain.handle("sp:playlists", wrap(Sp.getMyPlaylists));
-  ipcMain.handle("sp:playlist-count", wrap(Sp.getPlaylistTrackCount));
   ipcMain.handle("sp:recent", wrap(Sp.getRecentlyPlayed));
   ipcMain.handle("sp:search", wrap(Sp.searchTracks));
   ipcMain.handle("sp:playlist-tracks", wrap(Sp.getPlaylistTracks));
@@ -444,7 +443,7 @@ async function loadWidevine(): Promise<void> {
     return;
   }
   try {
-    console.log("[headspace] waiting for Widevine components…");
+    console.log("[headspace] waiting for Widevine components...");
     const t0 = Date.now();
     await components.whenReady();
     const elapsed = Date.now() - t0;
