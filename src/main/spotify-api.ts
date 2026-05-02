@@ -156,10 +156,12 @@ export async function getMyPlaylists(
       .filter((p): p is SpotifyPlaylist => !!p)
       .map(async (p) => {
         const listedTotal = Number(p.tracks?.total);
-        if (Number.isFinite(listedTotal)) {
-          return { ...p, trackTotal: listedTotal };
-        }
-        const trackTotal = await getPlaylistTrackTotal(p.id).catch(() => 0);
+        // Some accounts/API responses report `tracks.total` as 0 in the
+        // playlist list even when the playlist has items. Ask the playlist
+        // tracks endpoint for the authoritative total for each visible row.
+        const trackTotal = await getPlaylistTrackTotal(p.id).catch(() =>
+          Number.isFinite(listedTotal) ? listedTotal : 0,
+        );
         return { ...p, tracks: { total: trackTotal }, trackTotal };
       }),
   );
