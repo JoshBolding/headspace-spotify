@@ -2,7 +2,7 @@
 
 An Electron Spotify client rebuilt around the classic Headspace alien-head media player skin.
 
-![Headspace Spotify preview](docs/screenshots/alive-bold-preview.png)
+![Headspace Spotify open player preview](Screenshots/Player_Open.png)
 
 Headspace Spotify keeps the strange, compact desktop charm of the original skin: the alien head, tiny transport controls, sliding drawers, speaker ears, and neon interface language. Underneath, it adds a modern Spotify connection layer with OAuth, playback controls, library browsing, queue views, lyrics, themes, and audio-reactive visuals.
 
@@ -20,6 +20,12 @@ This is a fan/nostalgia project and an experiment in bringing old desktop skin c
 - Hidden face-alive Easter egg.
 
 ## Screenshots
+
+![Headspace Spotify compact player](Screenshots/Player_closed.png)
+
+![Headspace Spotify drawers open](Screenshots/Player_Open.png)
+
+![Headspace Spotify hidden eyes-open Easter egg](Screenshots/Player_EasterEgg.png)
 
 More screenshots live in [docs/screenshots](docs/screenshots), with a simple gallery in [docs/SCREENSHOTS.md](docs/SCREENSHOTS.md).
 
