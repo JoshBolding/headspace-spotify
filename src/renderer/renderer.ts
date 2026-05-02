@@ -330,6 +330,12 @@ function wireSpotifyAuth(onAuthed: () => void): void {
   let lastAutoHue: number | null = null;
 
   const themeBtn = document.getElementById("btn-theme-toggle") as HTMLButtonElement;
+  const THEME_BUTTON_LABELS: Record<string, string> = {
+    crimson: "CRIMS",
+    magenta: "MAGEN",
+    cobalt: "COB",
+    auto: "AUTO",
+  };
 
   function applyCurrentTheme(): void {
     const base = getTheme(currentThemeId);
@@ -338,7 +344,8 @@ function wireSpotifyAuth(onAuthed: () => void): void {
     } else {
       applyTheme(base);
     }
-    themeBtn.textContent = base.name.toUpperCase();
+    themeBtn.textContent = THEME_BUTTON_LABELS[base.id] ?? base.name.toUpperCase();
+    themeBtn.title = `Theme: ${base.name}`;
   }
   applyCurrentTheme();
 
