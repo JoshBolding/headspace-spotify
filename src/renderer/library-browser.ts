@@ -1,0 +1,299 @@
+/**
+ * Library browser rendered inside the right-ear drawer.
+ *
+ * Shows a tab row (Search / Liked / Playlists / Recent) and a scrolling list.
+ * Clicking a track triggers playback via the controller; clicking a playlist
+ * drills in and plays the playlist.
+ */
+
+import type { SpotifyController } from "./spotify-player";
+
+type Tab = "search" | "liked" | "playlists" | "recent";
+
+interface LibraryItem {
+  kind: "track" | "playlist";
+  id: string;
+  uri: string;
+  name: string;
+  subtitle: string;
+  thumbUrl?: string;
+  contextUri?: string;
+}
+
+const TAB_ORDER: Tab[] = ["search", "liked", "playlists", "recent"];
+const TAB_TITLES: Record<Tab, string> = {
+  search: "Search",
+  liked: "Liked",
+  playlists: "Playlists",
+  recent: "Recent",
+};
+const TAB_ICONS: Record<Tab, string> = {
+  search: "🔍",
+  liked: "❤",
+  playlists: "📂",
+  recent: "🕐",
+};
+
+export class LibraryBrowser {
+  private container: HTMLElement;
+  private controller: SpotifyController;
+  private currentTab: Tab = "liked";
+  private items: LibraryItem[] = [];
+  private isLoading = false;
+  private searchQuery = "";
+  private searchTimer: number | null = null;
+
+  private tabsEl: HTMLDivElement;
+  private inputEl: HTMLInputElement;
+  private listEl: HTMLDivElement;
+
+  constructor(container: HTMLElement, controller: SpotifyController) {
+    this.container = container;
+    this.controller = controller;
+    container.innerHTML = "";
+    container.classList.add("lb-root");
+
+    this.tabsEl = document.createElement("div");
+    this.tabsEl.className = "lb-tabs";
+    container.appendChild(this.tabsEl);
+
+    this.inputEl = document.createElement("input");
+    this.inputEl.className = "lb-search";
+    this.inputEl.placeholder = "Search Spotify…";
+    this.inputEl.style.display = "none";
+    this.inputEl.addEventListener("input", () => this.onSearchInput());
+    container.appendChild(this.inputEl);
+
+    this.listEl = document.createElement("div");
+    this.listEl.className = "lb-list";
+    container.appendChild(this.listEl);
+
+    this.renderTabs();
+    void this.loadTab("liked");
+  }
+
+  private renderTabs() {
+    this.tabsEl.innerHTML = "";
+    for (const t of TAB_ORDER) {
+      const b = document.createElement("button");
+      b.className = "lb-tab";
+      if (t === this.currentTab) b.classList.add("lb-tab-active");
+      b.title = TAB_TITLES[t];
+      b.textContent = TAB_ICONS[t];
+      b.addEventListener("click", () => this.switchTab(t));
+      this.tabsEl.appendChild(b);
+    }
+  }
+
+  async switchTab(tab: Tab) {
+    if (tab === this.currentTab) return;
+    this.currentTab = tab;
+    this.renderTabs();
+    this.inputEl.style.display = tab === "search" ? "block" : "none";
+    if (tab === "search") {
+      this.inputEl.focus();
+      this.items = [];
+      this.renderList();
+      if (this.searchQuery) await this.runSearch();
+    } else {
+      await this.loadTab(tab);
+    }
+  }
+
+  private async loadTab(tab: Exclude<Tab, "search">) {
+    this.isLoading = true;
+    this.renderList();
+    let result:
+      | {
+          items: Array<
+            | { kind: "track"; track: SpotifyTrackLite; addedAt?: string }
+            | { kind: "playlist"; playlist: SpotifyPlaylistLite }
+          >;
+        }
+      | { error: string }
+      | null = null;
+    if (tab === "liked") {
+      result = (await window.headspace.spLiked(0, 50)) as typeof result;
+    } else if (tab === "playlists") {
+      result = (await window.headspace.spPlaylists(0, 50)) as typeof result;
+    } else if (tab === "recent") {
+      result = (await window.headspace.spRecent(50)) as typeof result;
+    }
+    this.isLoading = false;
+    if (!result || "error" in result) {
+      this.items = [];
+    } else {
+      this.items = result.items.map(toLibraryItem);
+    }
+    this.renderList();
+  }
+
+  private onSearchInput() {
+    this.searchQuery = this.inputEl.value;
+    if (this.searchTimer) window.clearTimeout(this.searchTimer);
+    this.searchTimer = window.setTimeout(() => void this.runSearch(), 320);
+  }
+
+  private async runSearch() {
+    if (!this.searchQuery.trim()) {
+      this.items = [];
+      this.renderList();
+      return;
+    }
+    this.isLoading = true;
+    this.renderList();
+    const result = (await window.headspace.spSearch(this.searchQuery, 30)) as
+      | { items: Array<{ kind: "track"; track: SpotifyTrackLite }> }
+      | { error: string }
+      | null;
+    this.isLoading = false;
+    if (!result || "error" in result) {
+      this.items = [];
+    } else {
+      this.items = result.items.map(toLibraryItem);
+    }
+    this.renderList();
+  }
+
+  private renderList() {
+    this.listEl.innerHTML = "";
+    if (this.isLoading) {
+      const li = document.createElement("div");
+      li.className = "lb-empty";
+      li.textContent = "Loading…";
+      this.listEl.appendChild(li);
+      return;
+    }
+    if (!this.items.length) {
+      const li = document.createElement("div");
+      li.className = "lb-empty";
+      li.textContent =
+        this.currentTab === "search"
+          ? this.searchQuery
+            ? "No matches"
+            : "Type to search"
+          : "Nothing here yet";
+      this.listEl.appendChild(li);
+      return;
+    }
+    for (const item of this.items) {
+      const row = document.createElement("div");
+      row.className = "lb-item";
+      if (item.thumbUrl) {
+        const img = document.createElement("img");
+        img.src = item.thumbUrl;
+        img.className = "lb-thumb";
+        img.loading = "lazy";
+        row.appendChild(img);
+      } else {
+        const ph = document.createElement("div");
+        ph.className = "lb-thumb lb-thumb-placeholder";
+        row.appendChild(ph);
+      }
+      const text = document.createElement("div");
+      text.className = "lb-text";
+      const title = document.createElement("div");
+      title.className = "lb-title";
+      title.textContent = item.name;
+      const sub = document.createElement("div");
+      sub.className = "lb-sub";
+      sub.textContent = item.subtitle;
+      text.appendChild(title);
+      text.appendChild(sub);
+      row.appendChild(text);
+
+      row.addEventListener("click", () => this.onItemClick(item));
+
+      if (item.kind === "track") {
+        const queueBtn = document.createElement("button");
+        queueBtn.className = "lb-queue";
+        queueBtn.textContent = "+";
+        queueBtn.title = "Add to queue";
+        queueBtn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          void this.onQueueClick(item, queueBtn);
+        });
+        row.appendChild(queueBtn);
+      }
+
+      this.listEl.appendChild(row);
+    }
+  }
+
+  private onError: ((err: string) => void) | null = null;
+
+  setErrorHandler(fn: (err: string) => void) {
+    this.onError = fn;
+  }
+
+  private async onItemClick(item: LibraryItem) {
+    const r =
+      item.kind === "track"
+        ? await this.controller.playTrack(item.uri, item.contextUri)
+        : await this.controller.playContext(item.uri);
+    if (!r.ok) this.onError?.(r.error);
+  }
+
+  private async onQueueClick(item: LibraryItem, btn: HTMLButtonElement) {
+    if (item.kind !== "track") return;
+    btn.disabled = true;
+    btn.textContent = "...";
+    const r = await this.controller.addToQueue(item.uri);
+    if (!r.ok) {
+      btn.disabled = false;
+      btn.textContent = "+";
+      this.onError?.(r.error);
+      return;
+    }
+    btn.textContent = "✓";
+    window.setTimeout(() => {
+      btn.disabled = false;
+      btn.textContent = "+";
+    }, 1200);
+  }
+}
+
+interface SpotifyTrackLite {
+  id: string;
+  name: string;
+  uri: string;
+  duration_ms: number;
+  artists: { name: string }[];
+  album: { name: string; images: { url: string }[] };
+}
+
+interface SpotifyPlaylistLite {
+  id: string;
+  name: string;
+  uri: string;
+  images: { url: string }[];
+  owner: { display_name: string };
+  tracks: { total: number };
+}
+
+function toLibraryItem(
+  src:
+    | { kind: "track"; track: SpotifyTrackLite }
+    | { kind: "playlist"; playlist: SpotifyPlaylistLite },
+): LibraryItem {
+  if (src.kind === "track") {
+    const t = src.track;
+    return {
+      kind: "track",
+      id: t.id,
+      uri: t.uri,
+      name: t.name,
+      subtitle: t.artists.map((a) => a.name).join(", ") || t.album.name,
+      thumbUrl: t.album.images[t.album.images.length - 1]?.url,
+    };
+  }
+  const p = src.playlist;
+  return {
+    kind: "playlist",
+    id: p.id,
+    uri: p.uri,
+    name: p.name,
+    subtitle: `${p.tracks?.total ?? 0} tracks · ${p.owner?.display_name ?? "Unknown"}`,
+    thumbUrl: p.images?.[p.images.length - 1]?.url,
+  };
+}
