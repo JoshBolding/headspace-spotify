@@ -28,13 +28,6 @@ const TAB_TITLES: Record<Tab, string> = {
   recent: "Recent",
   settings: "Settings",
 };
-const TAB_ICONS: Record<Tab, string> = {
-  search: "🔍",
-  liked: "❤",
-  playlists: "📂",
-  recent: "🕐",
-  settings: "⚙",
-};
 
 export class LibraryBrowser {
   private container: HTMLElement;
@@ -46,6 +39,7 @@ export class LibraryBrowser {
   private searchTimer: number | null = null;
 
   private tabsEl: HTMLDivElement;
+  private tabLabelEl: HTMLDivElement;
   private inputEl: HTMLInputElement;
   private listEl: HTMLDivElement;
   private renderSettings?: (container: HTMLElement) => void | Promise<void>;
@@ -64,6 +58,10 @@ export class LibraryBrowser {
     this.tabsEl = document.createElement("div");
     this.tabsEl.className = "lb-tabs";
     container.appendChild(this.tabsEl);
+
+    this.tabLabelEl = document.createElement("div");
+    this.tabLabelEl.className = "lb-tab-label";
+    container.appendChild(this.tabLabelEl);
 
     this.inputEl = document.createElement("input");
     this.inputEl.className = "lb-search";
@@ -88,10 +86,14 @@ export class LibraryBrowser {
       b.className = "lb-tab";
       if (t === this.currentTab) b.classList.add("lb-tab-active");
       b.title = TAB_TITLES[t];
-      b.textContent = TAB_ICONS[t];
+      const icon = document.createElement("span");
+      icon.className = "lb-tab-icon";
+      icon.dataset.tab = t;
+      b.appendChild(icon);
       b.addEventListener("click", () => this.switchTab(t));
       this.tabsEl.appendChild(b);
     }
+    this.tabLabelEl.textContent = TAB_TITLES[this.currentTab];
   }
 
   async switchTab(tab: Tab) {
@@ -201,6 +203,9 @@ export class LibraryBrowser {
     for (const item of this.items) {
       const row = document.createElement("div");
       row.className = "lb-item";
+      if (item.uri === this.controller.state().track?.uri) {
+        row.classList.add("lb-item-current");
+      }
       if (item.thumbUrl) {
         const img = document.createElement("img");
         img.src = item.thumbUrl;
@@ -229,7 +234,7 @@ export class LibraryBrowser {
       if (item.kind === "track") {
         const queueBtn = document.createElement("button");
         queueBtn.className = "lb-queue";
-        queueBtn.textContent = "+";
+        queueBtn.textContent = "ADD";
         queueBtn.title = "Add to queue";
         queueBtn.addEventListener("click", (e) => {
           e.stopPropagation();
@@ -263,14 +268,16 @@ export class LibraryBrowser {
     const r = await this.controller.addToQueue(item.uri);
     if (!r.ok) {
       btn.disabled = false;
-      btn.textContent = "+";
+      btn.textContent = "ADD";
       this.onError?.(r.error);
       return;
     }
-    btn.textContent = "✓";
+    btn.classList.add("lb-queue-ok");
+    btn.textContent = "OK";
     window.setTimeout(() => {
       btn.disabled = false;
-      btn.textContent = "+";
+      btn.classList.remove("lb-queue-ok");
+      btn.textContent = "ADD";
     }, 1200);
   }
 }

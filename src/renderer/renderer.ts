@@ -486,6 +486,7 @@ function wireSpotifyAuth(onAuthed: () => void): void {
 
   // Now-playing strip
   const nowPlaying = document.getElementById("now-playing")!;
+  const leftNowView = document.getElementById("left-now-view")!;
   const pauseOverlay = document.getElementById("pause-overlay")!;
 
   const controller = new SpotifyController();
@@ -706,14 +707,45 @@ function wireSpotifyAuth(onAuthed: () => void): void {
   let lastTrackId: string | null = null;
   let trackChangeToken = 0; // race guard for any per-track async work
   let lastIsPlaying: boolean | null = null;
+  let leftNowRenderedId: string | null = null;
   // Cache the seek-fill element so we don't re-query the DOM every state tick.
   const seekFill = document.getElementById("seek-fill") as HTMLDivElement;
+
+  function renderLeftNow(track: SpotifyState["track"], artistNames = "") {
+    leftNowView.innerHTML = "";
+    const artUrl = track?.album.images.at(-1)?.url ?? track?.album.images[0]?.url ?? "";
+    if (artUrl) {
+      const img = document.createElement("img");
+      img.className = "qd-now-art";
+      img.src = artUrl;
+      img.alt = "";
+      leftNowView.appendChild(img);
+    } else {
+      const art = document.createElement("div");
+      art.className = "qd-now-art";
+      leftNowView.appendChild(art);
+    }
+    const text = document.createElement("div");
+    text.className = "qd-now-text";
+    const title = document.createElement("div");
+    title.className = "qd-now-title";
+    const sub = document.createElement("div");
+    sub.className = "qd-now-sub";
+    title.textContent = track?.name ?? "Awaiting playback";
+    sub.textContent = track ? artistNames || "Spotify" : "Pick a track from the right ear";
+    text.append(title, sub);
+    leftNowView.appendChild(text);
+  }
 
   controller.on((s: SpotifyState) => {
     queueView.handleState(s);
     if (s.track) {
       const artistNames = s.track.artists.map((a) => a.name).join(", ");
       nowPlaying.textContent = `${artistNames} — ${s.track.name}`;
+      if (leftNowRenderedId !== s.track.id) {
+        leftNowRenderedId = s.track.id;
+        renderLeftNow(s.track, artistNames);
+      }
       if (s.track.id !== lastTrackId) {
         lastTrackId = s.track.id;
         // Single token guards every per-track async fetch (palette + analysis).
@@ -755,6 +787,10 @@ function wireSpotifyAuth(onAuthed: () => void): void {
       }
     } else {
       nowPlaying.textContent = "— signed in, awaiting playback —";
+      if (leftNowRenderedId !== null) {
+        leftNowRenderedId = null;
+        renderLeftNow(null);
+      }
     }
     viz.setPlaying(s.isPlaying);
     viz.setPosition(s.positionMs);
@@ -909,16 +945,26 @@ function setupQueueDrawerStub() {
   const panel = document.getElementById("eq-panel");
   if (!panel) return;
   panel.innerHTML = `
-    <div class="qd-section">
+    <div class="qd-section qd-volume">
       <div class="qd-label">Volume</div>
       <div id="slot-volume-spotify"></div>
     </div>
-    <div class="qd-section">
-      <div class="qd-label">Balance <span id="qd-balance-note" class="qd-sub-note"></span></div>
-      <div id="slot-balance-spotify"></div>
+    <div class="qd-section qd-now">
+      <div class="qd-label">Now Playing</div>
+      <div id="left-now-view" class="qd-now-card">
+        <div class="qd-now-art"></div>
+        <div class="qd-now-text">
+          <div class="qd-now-title">Awaiting playback</div>
+          <div class="qd-now-sub">Pick a track from the right ear</div>
+        </div>
+      </div>
     </div>
     <div class="qd-section qd-queue">
       <div id="queue-view"></div>
+    </div>
+    <div class="qd-balance-advanced">
+      <span id="qd-balance-note" class="qd-sub-note"></span>
+      <div id="slot-balance-spotify"></div>
     </div>
   `;
 }
