@@ -72,6 +72,8 @@ contextBridge.exposeInMainWorld("headspace", {
     ipcRenderer.invoke("sp:liked", offset, limit),
   spPlaylists: (offset: number, limit: number) =>
     ipcRenderer.invoke("sp:playlists", offset, limit),
+  spPlaylistCount: (playlistId: string) =>
+    ipcRenderer.invoke("sp:playlist-count", playlistId),
   spRecent: (limit: number) => ipcRenderer.invoke("sp:recent", limit),
   spSearch: (query: string, limit: number) =>
     ipcRenderer.invoke("sp:search", query, limit),

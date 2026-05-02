@@ -51,6 +51,7 @@ declare global {
       spUser: () => Promise<unknown>;
       spLiked: (offset: number, limit: number) => Promise<unknown>;
       spPlaylists: (offset: number, limit: number) => Promise<unknown>;
+      spPlaylistCount: (playlistId: string) => Promise<unknown>;
       spRecent: (limit: number) => Promise<unknown>;
       spSearch: (query: string, limit: number) => Promise<unknown>;
       spPlaylistTracks: (id: string, offset: number, limit: number) => Promise<unknown>;

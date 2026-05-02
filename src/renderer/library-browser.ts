@@ -18,6 +18,7 @@ interface LibraryItem {
   subtitle: string;
   thumbUrl?: string;
   contextUri?: string;
+  playlistTrackTotal?: number | null;
 }
 
 export type QueuedLibraryItem = Readonly<LibraryItem>;
@@ -39,6 +40,7 @@ export class LibraryBrowser {
   private isLoading = false;
   private searchQuery = "";
   private searchTimer: number | null = null;
+  private countRunId = 0;
 
   private tabsEl: HTMLDivElement;
   private tabLabelEl: HTMLDivElement;
@@ -146,6 +148,7 @@ export class LibraryBrowser {
       this.items = result.items.map(toLibraryItem);
     }
     this.renderList();
+    if (tab === "playlists") void this.resolveVisiblePlaylistCounts();
   }
 
   private async renderSettingsPanel() {
@@ -186,6 +189,7 @@ export class LibraryBrowser {
   }
 
   private renderList() {
+    this.countRunId++;
     this.listEl.classList.remove("lb-settings-list");
     this.listEl.innerHTML = "";
     if (this.isLoading) {
@@ -231,6 +235,7 @@ export class LibraryBrowser {
       title.textContent = item.name;
       const sub = document.createElement("div");
       sub.className = "lb-sub";
+      sub.dataset.itemId = item.id;
       sub.textContent = item.subtitle;
       text.appendChild(title);
       text.appendChild(sub);
@@ -289,6 +294,31 @@ export class LibraryBrowser {
       btn.textContent = "ADD";
     }, 1200);
   }
+
+  private async resolveVisiblePlaylistCounts() {
+    const runId = this.countRunId;
+    const playlists = this.items.filter((item) => item.kind === "playlist");
+    await Promise.all(
+      playlists.map(async (item) => {
+        if (typeof item.playlistTrackTotal === "number") return;
+        const result = (await window.headspace.spPlaylistCount(item.id)) as
+          | number
+          | { error: string };
+        if (runId !== this.countRunId || this.currentTab !== "playlists") return;
+        if (typeof result === "number" && Number.isFinite(result)) {
+          item.playlistTrackTotal = result;
+          item.subtitle = formatPlaylistSubtitle(result, ownerFromSubtitle(item.subtitle));
+        } else {
+          item.playlistTrackTotal = null;
+          item.subtitle = `count unavailable · ${ownerFromSubtitle(item.subtitle)}`;
+        }
+        const sub = this.listEl.querySelector<HTMLElement>(
+          `.lb-sub[data-item-id="${CSS.escape(item.id)}"]`,
+        );
+        if (sub) sub.textContent = item.subtitle;
+      }),
+    );
+  }
 }
 
 interface SpotifyTrackLite {
@@ -306,8 +336,8 @@ interface SpotifyPlaylistLite {
   uri: string;
   images: { url: string }[];
   owner: { display_name: string };
-  tracks?: { total?: number };
-  trackTotal?: number;
+  tracks?: { total?: number | null };
+  trackTotal?: number | null;
 }
 
 function toLibraryItem(
@@ -327,12 +357,26 @@ function toLibraryItem(
     };
   }
   const p = src.playlist;
+  const trackTotal = typeof p.trackTotal === "number" ? p.trackTotal : null;
+  const owner = p.owner?.display_name ?? "Unknown";
   return {
     kind: "playlist",
     id: p.id,
     uri: p.uri,
     name: p.name,
-    subtitle: `${p.trackTotal ?? p.tracks?.total ?? 0} tracks · ${p.owner?.display_name ?? "Unknown"}`,
+    subtitle:
+      trackTotal !== null
+        ? formatPlaylistSubtitle(trackTotal, owner)
+        : `counting... · ${owner}`,
     thumbUrl: p.images?.[p.images.length - 1]?.url,
+    playlistTrackTotal: trackTotal,
   };
+}
+
+function formatPlaylistSubtitle(total: number, owner: string): string {
+  return `${total} ${total === 1 ? "track" : "tracks"} · ${owner}`;
+}
+
+function ownerFromSubtitle(subtitle: string): string {
+  return subtitle.split(" · ").at(-1) || "Unknown";
 }
