@@ -306,7 +306,8 @@ interface SpotifyPlaylistLite {
   uri: string;
   images: { url: string }[];
   owner: { display_name: string };
-  tracks: { total: number };
+  tracks?: { total?: number };
+  trackTotal?: number;
 }
 
 function toLibraryItem(
@@ -331,7 +332,7 @@ function toLibraryItem(
     id: p.id,
     uri: p.uri,
     name: p.name,
-    subtitle: `${p.tracks?.total ?? 0} tracks · ${p.owner?.display_name ?? "Unknown"}`,
+    subtitle: `${p.trackTotal ?? p.tracks?.total ?? 0} tracks · ${p.owner?.display_name ?? "Unknown"}`,
     thumbUrl: p.images?.[p.images.length - 1]?.url,
   };
 }

@@ -96,6 +96,7 @@ export interface SpotifyPlaylist {
   images: SpotifyImage[];
   owner: { display_name: string; id: string };
   tracks: { total: number };
+  trackTotal?: number;
 }
 
 export interface SpotifyUser {
@@ -148,15 +149,32 @@ export async function getMyPlaylists(
   limit = 50,
 ): Promise<{ items: LibraryItem[]; total: number; next: boolean }> {
   const res = await call<Paged<SpotifyPlaylist | null>>(
-    `/me/playlists?offset=${offset}&limit=${limit}`,
+    `/me/playlists?offset=${offset}&limit=${limit}&fields=items(id,name,uri,images,owner(display_name,id),tracks(total)),total,next,offset,limit`,
+  );
+  const playlists = await Promise.all(
+    res.items
+      .filter((p): p is SpotifyPlaylist => !!p)
+      .map(async (p) => {
+        const listedTotal = Number(p.tracks?.total);
+        if (Number.isFinite(listedTotal)) {
+          return { ...p, trackTotal: listedTotal };
+        }
+        const trackTotal = await getPlaylistTrackTotal(p.id).catch(() => 0);
+        return { ...p, tracks: { total: trackTotal }, trackTotal };
+      }),
   );
   return {
-    items: res.items
-      .filter((p): p is SpotifyPlaylist => !!p)
-      .map((p) => ({ kind: "playlist", playlist: p })),
+    items: playlists.map((p) => ({ kind: "playlist", playlist: p })),
     total: res.total,
     next: !!res.next,
   };
+}
+
+async function getPlaylistTrackTotal(playlistId: string): Promise<number> {
+  const res = await call<{ total: number }>(
+    `/playlists/${playlistId}/tracks?limit=1&fields=total`,
+  );
+  return Number(res.total) || 0;
 }
 
 export async function getRecentlyPlayed(
