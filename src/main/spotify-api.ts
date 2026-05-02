@@ -182,20 +182,20 @@ export async function searchTracks(
 ): Promise<{ items: LibraryItem[] }> {
   if (!query.trim()) return { items: [] };
   const safeLimit = Math.max(1, Math.min(20, Math.floor(Number(limit) || 20)));
-  const params = [
-    `q=${encodeURIComponent(query.trim())}`,
-    "type=track,playlist",
-    `limit=${safeLimit}`,
-    "market=from_token",
-  ].join("&");
-  const res = await call<{
-    tracks?: Paged<SpotifyTrack>;
-    playlists?: Paged<SpotifyPlaylist | null>;
-  }>(`/search?${params}`);
+  const q = encodeURIComponent(query.trim());
+  const [trackRes, playlistRes] = await Promise.all([
+    call<{ tracks?: Paged<SpotifyTrack> }>(`/search?q=${q}&type=track`),
+    call<{ playlists?: Paged<SpotifyPlaylist | null> }>(
+      `/search?q=${q}&type=playlist`,
+    ).catch(() => ({ playlists: undefined })),
+  ]);
   return {
     items: [
-      ...(res.tracks?.items ?? []).map((t) => ({ kind: "track" as const, track: t })),
-      ...(res.playlists?.items ?? [])
+      ...(trackRes.tracks?.items ?? [])
+        .slice(0, safeLimit)
+        .map((t) => ({ kind: "track" as const, track: t })),
+      ...(playlistRes.playlists?.items ?? [])
+        .slice(0, Math.ceil(safeLimit / 2))
         .filter((p): p is SpotifyPlaylist => !!p)
         .map((p) => ({ kind: "playlist" as const, playlist: p })),
     ],
