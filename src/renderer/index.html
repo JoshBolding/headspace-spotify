@@ -877,7 +877,7 @@
       .alive-eye {
         position: absolute;
         width: 70px;
-        height: 30px;
+        height: 38px;
         --blink-scale: 0.08;
         --lid-close: 1;
         --lid-top-y: 8px;
@@ -888,149 +888,79 @@
         --eye-rot: 0deg;
         --iris-offset-x: 0px;
         --socket-lift: 0px;
+        --eye-beat: 0;
+        --blink-x: 15px;
+        --blink-y: 8px;
+        --blink-w: 40px;
+        --blink-h: 22px;
         pointer-events: none;
+        overflow: visible;
         transform: rotate(var(--eye-rot));
         transform-origin: 50% 50%;
       }
-      .eye-socket-bed {
+      .eye-art {
         position: absolute;
         left: 0;
-        right: 0;
-        top: calc(2px + var(--socket-lift));
-        height: 28px;
-        border-radius: 50%;
-        background:
-          radial-gradient(ellipse at 50% 52%, rgba(0, 0, 0, 0.9) 0 28%, rgba(0, 0, 0, 0.62) 48%, transparent 76%),
-          radial-gradient(ellipse at 50% 42%, hsla(var(--theme-hue), 95%, 13%, 0.58), transparent 68%);
-        clip-path: polygon(1% 54%, 12% 34%, 33% 18%, 58% 17%, 81% 31%, 99% 52%, 83% 70%, 55% 81%, 27% 77%, 8% 63%);
-        mix-blend-mode: multiply;
-        opacity: 0.9;
-      }
-      .eye-aura {
-        position: absolute;
-        left: 9px;
-        right: 9px;
-        top: calc(8px + var(--socket-lift));
-        height: 18px;
-        border-radius: 50%;
-        background: radial-gradient(ellipse at 50% 52%, hsla(var(--theme-hue), 100%, 62%, calc(0.2 * var(--eye-glow))) 0 18%, hsla(var(--theme-hue), 100%, 42%, calc(0.12 * var(--eye-glow))) 42%, transparent 78%);
-        filter: blur(5px);
-        transform: scaleY(var(--blink-scale));
+        top: 0;
+        width: 100%;
+        height: 100%;
+        object-fit: fill;
+        z-index: 3;
+        opacity: calc(0.96 + (var(--eye-glow) * 0.04));
+        transform: translateY(calc(var(--eye-look-y) * 0.25));
         transform-origin: 50% 50%;
+        filter:
+          hue-rotate(calc((var(--theme-hue) - 108) * 1deg))
+          saturate(calc(0.78 + (var(--eye-glow) * 0.04)))
+          brightness(calc(0.88 + (var(--eye-glow) * 0.05)))
+          contrast(1.04);
+        mix-blend-mode: normal;
+        will-change: transform, filter;
       }
-      .eye-aperture {
-        position: absolute;
-        left: 9px;
-        right: 9px;
-        top: calc(8px + var(--socket-lift));
-        height: 17px;
-        overflow: hidden;
-        border-radius: 50%;
-        clip-path: polygon(0 54%, 12% 33%, 35% 18%, 60% 17%, 84% 32%, 100% 53%, 83% 70%, 56% 81%, 29% 77%, 8% 64%);
-        transform: scaleY(var(--blink-scale));
-        transform-origin: 50% 50%;
-        will-change: transform;
-      }
-      .eye-aperture::before {
+      .alive-eye::before {
         content: "";
         position: absolute;
-        inset: 0;
-        background:
-          radial-gradient(ellipse at 50% 52%, hsla(72, 100%, 94%, 0.7) 0 5%, hsla(var(--theme-hue), 100%, 68%, 0.55) 16%, hsla(var(--theme-hue), 100%, 33%, 0.42) 36%, rgba(2, 16, 0, 0.96) 78%),
-          linear-gradient(to bottom, rgba(255, 255, 255, 0.18), transparent 35%, rgba(0, 0, 0, 0.7));
-        box-shadow:
-          inset 0 2px 4px rgba(255, 255, 255, 0.18),
-          inset 0 -6px 10px rgba(0, 0, 0, 0.82),
-          0 0 8px hsla(var(--theme-hue), 100%, 62%, calc(0.45 * var(--eye-glow))),
-          0 0 18px hsla(var(--theme-hue), 100%, 48%, calc(0.38 * var(--eye-glow)));
-        filter: brightness(calc(0.82 + (var(--eye-glow) * 0.2))) saturate(1.2);
-      }
-      .eye-focus {
-        position: absolute;
-        inset: 0;
-        transform: translate(var(--eye-look-x), var(--eye-look-y));
-        will-change: transform;
-      }
-      .eye-core {
-        position: absolute;
-        left: calc(50% - 7px + var(--iris-offset-x));
-        top: 50%;
-        width: 14px;
-        height: 13px;
-        margin-top: -6.5px;
-        border-radius: 50%;
-        background:
-          radial-gradient(circle at 50% 52%, rgba(0, 7, 0, 0.99) 0 20%, transparent 22%),
-          repeating-conic-gradient(from 18deg, hsla(var(--theme-hue), 100%, 82%, 0.74) 0deg 7deg, hsla(var(--theme-hue), 100%, 34%, 0.2) 7deg 16deg),
-          radial-gradient(circle at 50% 52%, hsla(var(--theme-hue), 100%, 18%, 0.96) 0 38%, hsla(var(--theme-hue), 100%, 67%, 0.82) 42% 54%, hsla(var(--theme-hue), 100%, 26%, 0.7) 57% 68%, transparent 73%),
-          radial-gradient(circle at 49% 50%, hsla(var(--theme-hue), 100%, 78%, 0.75), transparent 72%);
-        box-shadow:
-          0 0 4px hsla(72, 100%, 92%, calc(0.45 * var(--eye-glow))),
-          0 0 11px hsla(var(--theme-hue), 100%, 58%, calc(0.68 * var(--eye-glow))),
-          inset 0 0 2px rgba(255, 255, 255, 0.32),
-          inset 0 0 5px rgba(0, 0, 0, 0.62);
-      }
-      .eye-core::before,
-      .eye-core::after {
-        content: "";
-        position: absolute;
-        border-radius: 50%;
-        background: rgba(245, 255, 220, 0.92);
-      }
-      .eye-core::before {
-        left: 3px;
-        top: 2px;
-        width: 4px;
-        height: 2px;
-        filter: blur(0.2px);
-      }
-      .eye-core::after {
-        inset: 2px;
-        border: 1px solid hsla(var(--theme-hue), 100%, 74%, 0.48);
-        background: transparent;
-        opacity: 0.75;
-      }
-      .eye-lid-shadow,
-      .eye-upper-lid,
-      .eye-lower-lid {
-        position: absolute;
-        left: 4px;
-        right: 4px;
-        top: calc(3px + var(--socket-lift));
-        height: 26px;
-        border-radius: 50%;
+        left: var(--blink-x);
+        width: var(--blink-w);
+        top: var(--blink-y);
+        height: var(--blink-h);
+        z-index: 5;
         pointer-events: none;
-      }
-      .eye-lid-shadow {
         background:
-          linear-gradient(to bottom, rgba(0, 0, 0, 0.78) 0 18%, transparent 48%, rgba(0, 0, 0, 0.5) 86%, rgba(0, 0, 0, 0.78) 100%),
-          radial-gradient(ellipse at 50% 12%, rgba(0, 0, 0, 0.7), transparent 58%);
-        clip-path: polygon(0 51%, 12% 27%, 36% 12%, 64% 13%, 87% 29%, 100% 51%, 84% 67%, 57% 76%, 29% 73%, 8% 62%);
+          radial-gradient(ellipse at 50% 42%, hsla(var(--theme-hue), 96%, 42%, 0.72), hsla(var(--theme-hue), 95%, 27%, 0.94) 55%, hsla(var(--theme-hue), 94%, 15%, 0.76)),
+          linear-gradient(to bottom, hsla(var(--theme-hue), 96%, 40%, 0.7), hsla(var(--theme-hue), 92%, 18%, 0.88));
+        border-radius: 50%;
+        opacity: calc(var(--lid-close) * 0.96);
+        transform: scaleY(var(--lid-close));
+        transform-origin: 50% 50%;
+        box-shadow:
+          inset 0 2px 4px hsla(var(--theme-hue), 85%, 55%, 0.22),
+          inset 0 -2px 5px rgba(0, 0, 0, 0.38);
+        will-change: transform, opacity;
       }
-      .eye-upper-lid {
-        background: linear-gradient(to bottom, rgba(0, 0, 0, 0.96), rgba(0, 0, 0, 0.62) 60%, transparent);
-        clip-path: polygon(0 0, 100% 0, 100% 58%, 83% 42%, 59% 31%, 34% 31%, 12% 44%, 0 58%);
-        transform: translateY(var(--lid-top-y));
-        opacity: 0.68;
-      }
-      .eye-lower-lid {
-        background: linear-gradient(to top, rgba(0, 0, 0, 0.9), rgba(0, 0, 0, 0.55) 55%, transparent);
-        clip-path: polygon(0 100%, 100% 100%, 100% 58%, 84% 66%, 58% 76%, 30% 72%, 8% 63%, 0 58%);
-        transform: translateY(var(--lid-bottom-y));
-        opacity: calc(0.26 + (var(--lid-close) * 0.12));
+      .alive-eye::after {
+        content: none;
       }
       #alive-eye-left {
-        left: 26px;
-        top: 254px;
-        --eye-rot: 3deg;
-        --iris-offset-x: 2px;
+        left: 29px;
+        top: 256px;
+        --eye-rot: 2deg;
+        --iris-offset-x: 1px;
+        --blink-x: 15px;
+        --blink-y: 8px;
+        --blink-w: 40px;
+        --blink-h: 22px;
         --socket-lift: 0px;
       }
       #alive-eye-right {
-        left: 144px;
-        top: 254px;
-        --eye-rot: -3deg;
-        --iris-offset-x: -2px;
+        left: 135px;
+        top: 256px;
+        --eye-rot: -2deg;
+        --iris-offset-x: -1px;
+        --blink-x: 15px;
+        --blink-y: 8px;
+        --blink-w: 40px;
+        --blink-h: 22px;
         --socket-lift: 0px;
       }
       #alive-head-light {
@@ -1055,6 +985,9 @@
       }
       body.face-alive #alive-head-light {
         opacity: 1;
+      }
+      body.face-alive #now-playing {
+        opacity: 0;
       }
       /* Eyes live INSIDE #head-group so they inherit the same sway/tilt
          transform as the head bitmap. Positions are relative to the group. */
@@ -1456,6 +1389,7 @@
         text-overflow: ellipsis;
         z-index: 8;
         pointer-events: none;
+        transition: opacity 220ms ease;
       }
 
       /* === Debug overlay ================================================= */
@@ -1526,24 +1460,10 @@
         <div id="alive-head-light"></div>
         <div id="alive-eye-layer">
           <div id="alive-eye-left" class="alive-eye">
-            <div class="eye-socket-bed"></div>
-            <div class="eye-aura"></div>
-            <div class="eye-aperture">
-              <div class="eye-focus"><div class="eye-core"></div></div>
-            </div>
-            <div class="eye-lid-shadow"></div>
-            <div class="eye-upper-lid"></div>
-            <div class="eye-lower-lid"></div>
+            <img class="eye-art" src="alive/alive-eye-left.png" alt="" />
           </div>
           <div id="alive-eye-right" class="alive-eye">
-            <div class="eye-socket-bed"></div>
-            <div class="eye-aura"></div>
-            <div class="eye-aperture">
-              <div class="eye-focus"><div class="eye-core"></div></div>
-            </div>
-            <div class="eye-lid-shadow"></div>
-            <div class="eye-upper-lid"></div>
-            <div class="eye-lower-lid"></div>
+            <img class="eye-art" src="alive/alive-eye-right.png" alt="" />
           </div>
         </div>
       </div>

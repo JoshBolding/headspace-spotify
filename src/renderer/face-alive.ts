@@ -228,7 +228,7 @@ export class FaceAlive {
     // Base brightness 0.85 so they're always clearly visible when alive
     // mode is on, even during quiet passages. Capped at 1.4 so loud passages
     // don't bloom into pure white.
-    const eyeGlow = Math.min(1.4, 0.85 + intensity * 0.55 + this.earBeatPulse * 0.3);
+    const eyeGlow = Math.min(1.55, 0.95 + intensity * 0.45 + this.earBeatPulse * 0.24);
     const blinkScale = this.computeBlinkScale(now);
     const lookX = Math.sin(elapsedSec * 0.72 + 0.4) * 0.8 + this.gazeX + this.headLookX * 0.45;
     const lookY = Math.sin(elapsedSec * 0.48 + 1.3) * 0.35 + this.gazeY + this.headLookY * 0.35;
@@ -312,9 +312,11 @@ export class FaceAlive {
     const lidClose = 1 - blinkScale;
     const lidTopY = -9 + lidClose * 13;
     const lidBottomY = 5 - lidClose * 2;
+    const eyeBeat = Math.min(1, this.earBeatPulse);
     for (const eyeEl of [this.leftEyeEl, this.rightEyeEl]) {
       if (!eyeEl) continue;
       eyeEl.style.setProperty("--eye-glow", eyeGlow.toFixed(3));
+      eyeEl.style.setProperty("--eye-beat", eyeBeat.toFixed(3));
       eyeEl.style.setProperty("--blink-scale", blinkScale.toFixed(3));
       eyeEl.style.setProperty("--lid-close", lidClose.toFixed(3));
       eyeEl.style.setProperty("--lid-top-y", `${lidTopY.toFixed(2)}px`);
