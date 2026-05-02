@@ -4,7 +4,6 @@ import {
   desktopCapturer,
   dialog,
   ipcMain,
-  screen,
   session,
   shell,
 } from "electron";
@@ -157,37 +156,6 @@ function createWindow() {
     if (!win) return;
     const [, h] = win.getSize();
     win.setSize(Math.round(width), h);
-  });
-
-  // Manual drag, polled. Driving setPosition from renderer pointermove events
-  // gets choppy because the window moves underneath the cursor and event flow
-  // can't keep up. Instead, renderer says "start drag, here's the grab offset
-  // within the window," then main polls the OS cursor at 60fps and slews the
-  // window. Decoupled from renderer events entirely — smooth and capture-safe.
-  let dragGrab: { dx: number; dy: number } | null = null;
-  let dragTimer: NodeJS.Timeout | null = null;
-
-  function stopDragTimer() {
-    if (dragTimer) {
-      clearInterval(dragTimer);
-      dragTimer = null;
-    }
-  }
-
-  ipcMain.on("drag:start", (_evt, dx: number, dy: number) => {
-    if (!win) return;
-    dragGrab = { dx: Math.round(dx), dy: Math.round(dy) };
-    stopDragTimer();
-    // 16ms ≈ 60Hz. Cheap on Win — getCursorScreenPoint is a single GetCursorPos.
-    dragTimer = setInterval(() => {
-      if (!win || !dragGrab) return;
-      const p = screen.getCursorScreenPoint();
-      win.setPosition(p.x - dragGrab.dx, p.y - dragGrab.dy);
-    }, 16);
-  });
-  ipcMain.on("drag:end", () => {
-    dragGrab = null;
-    stopDragTimer();
   });
 
   ipcMain.on("window:toggle-on-top", () => {

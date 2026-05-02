@@ -432,6 +432,20 @@
         height: var(--head-h);
         z-index: 6;
         cursor: default;
+        -webkit-app-region: drag;
+      }
+      button,
+      input,
+      canvas,
+      .hotzone,
+      .ear-handle,
+      .drawer-body,
+      #nose-hitbox,
+      #transport,
+      #seek-track,
+      #status-overlay,
+      #auth-overlay {
+        -webkit-app-region: no-drag;
       }
 
       /* === Face screen / visualizer ======================================

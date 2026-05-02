@@ -38,8 +38,6 @@ declare global {
       minimize: () => void;
       close: () => void;
       setSize: (w: number, h: number) => void;
-      dragStart: (dx: number, dy: number) => void;
-      dragEnd: () => void;
       toggleOnTop: () => void;
 
       authStatus: () => Promise<AuthStatus>;
@@ -170,27 +168,6 @@ function wireHitTesting(): void {
   });
 }
 
-function wireDrag(): void {
-  const drag = document.getElementById("drag");
-  if (!drag) return;
-  let dragging = false;
-  drag.addEventListener("pointerdown", (e) => {
-    if (e.button !== 0) return;
-    if (!isHeadPixel(e.clientX, e.clientY)) return;
-    e.preventDefault();
-    dragging = true;
-    window.headspace.dragStart(e.clientX, e.clientY);
-  });
-  const end = () => {
-    if (!dragging) return;
-    dragging = false;
-    window.headspace.dragEnd();
-  };
-  window.addEventListener("pointerup", end);
-  window.addEventListener("pointercancel", end);
-  window.addEventListener("blur", end);
-}
-
 function wireKeys(controller: SpotifyController): void {
   document.addEventListener("keydown", (e) => {
     if (e.ctrlKey && e.key.toLowerCase() === "d")
@@ -241,7 +218,6 @@ function wireSpotifyAuth(onAuthed: () => void): void {
 (async () => {
   await buildHeadMask();
   wireHitTesting();
-  wireDrag();
 
   const vizCanvas = document.getElementById("vis-canvas") as HTMLCanvasElement;
   const viz = new Visualizer(vizCanvas);
