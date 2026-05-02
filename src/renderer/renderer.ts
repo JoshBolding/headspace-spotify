@@ -43,7 +43,7 @@ declare global {
       toggleOnTop: () => void;
 
       authStatus: () => Promise<AuthStatus>;
-      authSignIn: () => Promise<{ success: boolean; error?: string }>;
+      authSignIn: (opts?: { showDialog?: boolean }) => Promise<{ success: boolean; error?: string }>;
       authSignOut: () => Promise<boolean>;
       authGetToken: () => Promise<string | null>;
       onAuthChanged: (cb: (status: AuthStatus) => void) => () => void;
@@ -223,7 +223,7 @@ function wireSpotifyAuth(onAuthed: () => void): void {
     btn.disabled = true;
     btn.textContent = "Opening browser…";
     status.textContent = "Complete sign-in in your browser, then return here.";
-    const result = await window.headspace.authSignIn();
+    const result = await window.headspace.authSignIn({ showDialog: true });
     if (!result.success) {
       btn.disabled = false;
       btn.textContent = "Sign in";
@@ -564,6 +564,81 @@ function wireSpotifyAuth(onAuthed: () => void): void {
     if (statusHideTimer) window.clearTimeout(statusHideTimer);
     statusOverlay.classList.remove("show");
   }
+
+  const accountBtn = document.getElementById("btn-account") as HTMLButtonElement;
+
+  async function refreshAccountButton() {
+    const auth = await window.headspace.authStatus();
+    accountBtn.dataset.authenticated = auth.authenticated ? "1" : "0";
+    accountBtn.title = auth.authenticated
+      ? "Spotify account"
+      : "Spotify setup and sign in";
+  }
+
+  async function signOutAndReload() {
+    await window.headspace.authSignOut();
+    hideStatus();
+    window.location.reload();
+  }
+
+  async function switchSpotifyAccount() {
+    await window.headspace.authSignOut();
+    showStatus(
+      "Switch Spotify account",
+      "Opening Spotify sign-in in your browser. If Spotify keeps selecting the same account, sign out at spotify.com in that browser and try again.",
+      { durationMs: 7000 },
+    );
+    const result = await window.headspace.authSignIn({ showDialog: true });
+    if (result.success) window.location.reload();
+    else {
+      showStatus("Sign-in failed", result.error ?? "Unknown error.", {
+        durationMs: 7000,
+      });
+    }
+  }
+
+  accountBtn.addEventListener("click", async () => {
+    const auth = await window.headspace.authStatus();
+    if (!auth.authenticated) {
+      showStatus(
+        "Spotify setup",
+        "Create a Spotify Developer app, copy its Client ID into .env as SPOTIFY_CLIENT_ID, and add this exact redirect URI in the Spotify dashboard:\n\nhttp://127.0.0.1:8888/callback",
+        {
+          actions: [
+            {
+              label: "Sign in",
+              primary: true,
+              onClick: async () => {
+                const result = await window.headspace.authSignIn({ showDialog: true });
+                if (result.success) window.location.reload();
+                else showStatus("Sign-in failed", result.error ?? "Unknown error.");
+              },
+            },
+            { label: "Close", onClick: hideStatus },
+          ],
+        },
+      );
+      return;
+    }
+
+    let accountLine = "Signed in to Spotify.";
+    const user = await window.headspace.spUser();
+    if (user && typeof user === "object" && !("error" in user)) {
+      const profile = user as { display_name?: string; email?: string; id?: string };
+      const name = profile.display_name || profile.id || "Spotify user";
+      accountLine = `Signed in as ${name}${profile.email ? `\n${profile.email}` : ""}.`;
+    }
+
+    showStatus("Spotify account", accountLine, {
+      actions: [
+        { label: "Switch", primary: true, onClick: switchSpotifyAccount },
+        { label: "Sign out", onClick: signOutAndReload },
+        { label: "Close", onClick: hideStatus },
+      ],
+    });
+  });
+  window.headspace.onAuthChanged(() => void refreshAccountButton());
+  void refreshAccountButton();
 
   const transport = await Transport.create(document.getElementById("transport")!, {
     onClick: (btn) => {

@@ -1035,6 +1035,36 @@
         color: rgba(220, 200, 140, 0.8);
       }
 
+      #btn-account {
+        position: absolute;
+        left: calc(var(--head-x) + 102px);
+        top: 196px;
+        width: 38px;
+        z-index: 8;
+        appearance: none;
+        -webkit-appearance: none;
+        font: inherit;
+        font-size: 8px;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        padding: 1px 5px;
+        border-radius: 999px;
+        background: rgba(6, 22, 0, 0.7);
+        border: 1px solid hsla(var(--theme-hue), 65%, 55%, 0.4);
+        color: hsla(var(--theme-hue), 75%, 81%, 0.85);
+        cursor: pointer;
+        text-align: center;
+        transition: background 120ms, border-color 120ms, color 120ms;
+      }
+      #btn-account:hover {
+        background: rgba(40, 95, 3, 0.85);
+        border-color: hsla(var(--theme-hue), 75%, 70%, 0.85);
+      }
+      #btn-account[data-authenticated="1"] {
+        border-color: rgba(30, 215, 96, 0.75);
+        color: hsl(var(--theme-hue), 75%, 86%);
+      }
+
       /* === Vis-mode label that flashes on the face screen on change ==== */
       #vis-mode-label {
         position: absolute;
@@ -1481,6 +1511,7 @@
         <div class="ly-current" id="ly-current"></div>
         <div class="ly-next" id="ly-next"></div>
       </div>
+      <button id="btn-account" data-opaque="1" title="Spotify account">SPOT</button>
       <button id="btn-theme-toggle" data-opaque="1" title="Cycle theme">THEME</button>
       <button id="btn-lyrics-toggle" data-opaque="1" title="Toggle lyrics">LYRICS</button>
       <div id="status-overlay" data-opaque="1">

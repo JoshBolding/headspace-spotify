@@ -56,8 +56,8 @@ contextBridge.exposeInMainWorld("headspace", {
 
   // Spotify OAuth
   authStatus: (): Promise<AuthStatus> => ipcRenderer.invoke("auth:status"),
-  authSignIn: (): Promise<{ success: boolean; error?: string }> =>
-    ipcRenderer.invoke("auth:sign-in"),
+  authSignIn: (opts?: { showDialog?: boolean }): Promise<{ success: boolean; error?: string }> =>
+    ipcRenderer.invoke("auth:sign-in", opts),
   authSignOut: (): Promise<boolean> => ipcRenderer.invoke("auth:sign-out"),
   authGetToken: (): Promise<string | null> => ipcRenderer.invoke("auth:get-token"),
   onAuthChanged: (cb: (status: AuthStatus) => void) => {

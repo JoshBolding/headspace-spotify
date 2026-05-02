@@ -7,6 +7,7 @@ Use this before posting the repo in Discord, GitHub, or a builder community.
 - Run `npm run build`.
 - Confirm `.env` is not tracked.
 - Confirm README setup instructions are accurate.
+- Confirm `docs/SPOTIFY_SETUP.md` matches the current app redirect URI.
 - Open the app and verify Spotify sign-in still works.
 - Capture one current screenshot or short GIF/video from the latest build.
 - Decide whether to show the face-alive Easter egg or keep it as a hidden detail.

@@ -49,6 +49,8 @@ More screenshots live in [docs/screenshots](docs/screenshots), with a simple gal
    npm start
    ```
 
+For the full setup path, see [Spotify Setup](docs/SPOTIFY_SETUP.md).
+
 ## Development
 
 Build both Electron main and renderer bundles:

@@ -341,7 +341,7 @@ function createWindow() {
   });
 
   let activeAuthFlow = false;
-  ipcMain.handle("auth:sign-in", async () => {
+  ipcMain.handle("auth:sign-in", async (_evt, opts?: { showDialog?: boolean }) => {
     if (activeAuthFlow) return { success: false, error: "already_in_progress" };
     activeAuthFlow = true;
     let config;
@@ -399,6 +399,7 @@ function createWindow() {
         codeChallenge: challenge,
         scopes: config.scopes,
         state,
+        showDialog: opts?.showDialog,
       });
       void shell.openExternal(authorizeUrl);
 
