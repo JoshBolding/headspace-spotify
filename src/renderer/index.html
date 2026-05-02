@@ -780,7 +780,7 @@
         text-overflow: ellipsis;
       }
 
-      /* === Theme cycle button (sits left of LYRICS toggle) ============= */
+      /* === Theme + lyrics controls at the lower screen edge ============ */
       #btn-theme-toggle {
         position: absolute;
         left: calc(var(--head-x) + 144px);
@@ -810,12 +810,11 @@
         border-color: hsla(var(--theme-hue), 75%, 70%, 0.85);
       }
 
-      /* === Lyrics toggle button (sits next to vis-mode cycle) ========== */
       #btn-lyrics-toggle {
         position: absolute;
-        left: calc(var(--head-x) + 196px);
+        left: calc(var(--head-x) + 14px);
         top: 196px;
-        width: 39px;
+        width: 53px;
         z-index: 8;
         appearance: none;
         -webkit-appearance: none;
@@ -1050,36 +1049,6 @@
       body.face-alive #head-group {
         transition: transform 80ms ease-out;
         transform-origin: 50% 65%;
-      }
-
-      /* === Live-audio source badge (bottom-left of screen) ============= */
-      #live-audio-badge {
-        position: absolute;
-        left: calc(var(--head-x) + 14px);
-        top: 196px;
-        z-index: 5;
-        pointer-events: none;
-        font-size: 7px;
-        text-transform: uppercase;
-        letter-spacing: 0.1em;
-        padding: 1px 5px;
-        border-radius: 999px;
-        background: rgba(6, 22, 0, 0.65);
-        border: 1px solid hsla(var(--theme-hue), 65%, 55%, 0.4);
-        color: hsla(var(--theme-hue), 75%, 81%, 0.85);
-        opacity: 0;
-        transition: opacity 200ms;
-      }
-      #live-audio-badge[data-show="1"] {
-        opacity: 0.7;
-      }
-      #live-audio-badge[data-source="loopback"] {
-        border-color: rgba(30, 215, 96, 0.7);
-        color: hsl(var(--theme-hue), 75%, 81%);
-      }
-      #live-audio-badge[data-source="synthetic"] {
-        border-color: rgba(220, 180, 80, 0.4);
-        color: rgba(220, 200, 140, 0.8);
       }
 
       /* === Vis-mode label that flashes on the face screen on change ==== */
@@ -1522,7 +1491,6 @@
       <!-- Face-screen visualizer -->
       <canvas id="vis-canvas"></canvas>
       <div id="vis-mode-label"></div>
-      <div id="live-audio-badge" data-source="synthetic"></div>
       <div id="lyrics-overlay">
         <div class="ly-prev" id="ly-prev"></div>
         <div class="ly-current" id="ly-current"></div>

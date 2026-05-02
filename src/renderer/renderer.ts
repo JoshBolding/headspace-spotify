@@ -274,15 +274,6 @@ function wireSpotifyAuth(onAuthed: () => void): void {
       flashVisLabel(faceAlive.isActive() ? "★ Alive Mode" : "☆ Sleep");
     }
   });
-  const liveBadge = document.getElementById("live-audio-badge")!;
-  function updateLiveBadge() {
-    const src = liveAudio.getSource();
-    const label = src ?? "synthetic";
-    liveBadge.textContent = label === "loopback" ? "● live audio" : label === "tap" ? "● tapped" : "synth 120bpm";
-    liveBadge.setAttribute("data-source", label);
-    liveBadge.setAttribute("data-show", "1");
-  }
-
   /**
    * Try the cheap audio-element tap first; if blocked by DRM (almost always),
    * fall through to WASAPI loopback via desktopCapturer. Both are gestureless
@@ -295,7 +286,6 @@ function wireSpotifyAuth(onAuthed: () => void): void {
     if (await liveAudio.tryTap()) {
       viz.setLiveAudio(liveAudio);
       faceAlive.setLiveAudio(liveAudio);
-      updateLiveBadge();
       refreshBalanceAvailability();
       console.log("[viz] live audio: tap succeeded");
       return;
@@ -303,14 +293,12 @@ function wireSpotifyAuth(onAuthed: () => void): void {
     if (await liveAudio.tryLoopback()) {
       viz.setLiveAudio(liveAudio);
       faceAlive.setLiveAudio(liveAudio);
-      updateLiveBadge();
       refreshBalanceAvailability();
       console.log(
         "[viz] live audio: loopback active (capturing system audio — captures ALL audio, not just Spotify)",
       );
       return;
     }
-    updateLiveBadge();
     refreshBalanceAvailability();
     console.warn(
       "[viz] no live audio source available — falling back to synthetic 120 BPM analysis. Press Ctrl+L to retry.",
