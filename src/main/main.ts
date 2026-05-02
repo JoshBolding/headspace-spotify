@@ -4,6 +4,7 @@ import {
   desktopCapturer,
   dialog,
   ipcMain,
+  screen,
   session,
   shell,
 } from "electron";
@@ -143,10 +144,16 @@ function createWindow() {
     win.loadFile(join(__dirname, "..", "dist-renderer", "index.html"));
   }
 
+  let isDragging = false;
+  let dragGrab: { dx: number; dy: number } | null = null;
+  let dragTimer: NodeJS.Timeout | null = null;
+  let lastDragPos: { x: number; y: number } | null = null;
+
   // Alpha-aware click-through: renderer sends us hit-test results per pointer move.
   // True = forward clicks to whatever is behind; false = window receives clicks normally.
   ipcMain.on("hit-test", (_evt, isOverOpaque: boolean) => {
     if (!win) return;
+    if (isDragging) return;
     win.setIgnoreMouseEvents(!isOverOpaque, { forward: true });
   });
 
@@ -156,6 +163,41 @@ function createWindow() {
     if (!win) return;
     const [, h] = win.getSize();
     win.setSize(Math.round(width), h);
+  });
+
+  // Smooth custom drag for the transparent, click-through shaped window.
+  // Native CSS drag regions don't behave reliably with setIgnoreMouseEvents,
+  // so main owns the drag and samples the OS cursor directly.
+  function stopDragTimer() {
+    if (dragTimer) {
+      clearInterval(dragTimer);
+      dragTimer = null;
+    }
+  }
+
+  ipcMain.on("drag:start", (_evt, dx: number, dy: number) => {
+    if (!win) return;
+    isDragging = true;
+    dragGrab = { dx: Math.round(dx), dy: Math.round(dy) };
+    lastDragPos = null;
+    win.setIgnoreMouseEvents(false);
+    stopDragTimer();
+    dragTimer = setInterval(() => {
+      if (!win || !dragGrab) return;
+      const p = screen.getCursorScreenPoint();
+      const x = p.x - dragGrab.dx;
+      const y = p.y - dragGrab.dy;
+      if (lastDragPos?.x === x && lastDragPos.y === y) return;
+      lastDragPos = { x, y };
+      win.setPosition(x, y, false);
+    }, 8);
+  });
+
+  ipcMain.on("drag:end", () => {
+    isDragging = false;
+    dragGrab = null;
+    lastDragPos = null;
+    stopDragTimer();
   });
 
   ipcMain.on("window:toggle-on-top", () => {

@@ -22,6 +22,8 @@ contextBridge.exposeInMainWorld("headspace", {
   close: () => ipcRenderer.send("window:close"),
   setWidth: (w: number) => ipcRenderer.send("window:set-width", w),
   setSize: (w: number, h: number) => ipcRenderer.send("window:set-size", w, h),
+  dragStart: (dx: number, dy: number) => ipcRenderer.send("drag:start", dx, dy),
+  dragEnd: () => ipcRenderer.send("drag:end"),
   toggleOnTop: () => ipcRenderer.send("window:toggle-on-top"),
 
   // Returns a desktopCapturer screen source ID. Renderer feeds this into
