@@ -539,22 +539,28 @@
         transform-origin: center;
       }
       .lb-tab-icon[data-tab="liked"]::before {
-        left: 3px;
-        top: 5px;
-        width: 8px;
-        height: 7px;
+        left: 1px;
+        top: 2px;
+        width: 11px;
+        height: 10px;
         background: currentColor;
-        transform: rotate(45deg);
-        border-radius: 0 0 2px 0;
+        clip-path: polygon(
+          50% 92%,
+          13% 58%,
+          6% 42%,
+          8% 25%,
+          20% 13%,
+          36% 13%,
+          50% 27%,
+          64% 13%,
+          80% 13%,
+          92% 25%,
+          94% 42%,
+          87% 58%
+        );
       }
       .lb-tab-icon[data-tab="liked"]::after {
-        left: 2px;
-        top: 2px;
-        width: 10px;
-        height: 8px;
-        background:
-          radial-gradient(circle at 30% 38%, currentColor 0 32%, transparent 34%),
-          radial-gradient(circle at 70% 38%, currentColor 0 32%, transparent 34%);
+        display: none;
       }
       .lb-tab-icon[data-tab="playlists"]::before {
         left: 1px;
