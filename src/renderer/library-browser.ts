@@ -8,7 +8,7 @@
 
 import type { SpotifyController } from "./spotify-player";
 
-type Tab = "search" | "liked" | "playlists" | "recent";
+type Tab = "search" | "liked" | "playlists" | "recent" | "settings";
 
 interface LibraryItem {
   kind: "track" | "playlist";
@@ -26,12 +26,14 @@ const TAB_TITLES: Record<Tab, string> = {
   liked: "Liked",
   playlists: "Playlists",
   recent: "Recent",
+  settings: "Settings",
 };
 const TAB_ICONS: Record<Tab, string> = {
   search: "🔍",
   liked: "❤",
   playlists: "📂",
   recent: "🕐",
+  settings: "⚙",
 };
 
 export class LibraryBrowser {
@@ -46,10 +48,16 @@ export class LibraryBrowser {
   private tabsEl: HTMLDivElement;
   private inputEl: HTMLInputElement;
   private listEl: HTMLDivElement;
+  private renderSettings?: (container: HTMLElement) => void | Promise<void>;
 
-  constructor(container: HTMLElement, controller: SpotifyController) {
+  constructor(
+    container: HTMLElement,
+    controller: SpotifyController,
+    opts: { renderSettings?: (container: HTMLElement) => void | Promise<void> } = {},
+  ) {
     this.container = container;
     this.controller = controller;
+    this.renderSettings = opts.renderSettings;
     container.innerHTML = "";
     container.classList.add("lb-root");
 
@@ -74,7 +82,8 @@ export class LibraryBrowser {
 
   private renderTabs() {
     this.tabsEl.innerHTML = "";
-    for (const t of TAB_ORDER) {
+    const tabs = this.renderSettings ? [...TAB_ORDER, "settings" as const] : TAB_ORDER;
+    for (const t of tabs) {
       const b = document.createElement("button");
       b.className = "lb-tab";
       if (t === this.currentTab) b.classList.add("lb-tab-active");
@@ -95,12 +104,14 @@ export class LibraryBrowser {
       this.items = [];
       this.renderList();
       if (this.searchQuery) await this.runSearch();
+    } else if (tab === "settings") {
+      await this.renderSettingsPanel();
     } else {
       await this.loadTab(tab);
     }
   }
 
-  private async loadTab(tab: Exclude<Tab, "search">) {
+  private async loadTab(tab: Exclude<Tab, "search" | "settings">) {
     this.isLoading = true;
     this.renderList();
     let result:
@@ -126,6 +137,16 @@ export class LibraryBrowser {
       this.items = result.items.map(toLibraryItem);
     }
     this.renderList();
+  }
+
+  private async renderSettingsPanel() {
+    this.items = [];
+    this.isLoading = false;
+    this.listEl.innerHTML = "";
+    this.listEl.classList.add("lb-settings-list");
+    if (this.renderSettings) {
+      await this.renderSettings(this.listEl);
+    }
   }
 
   private onSearchInput() {
@@ -156,6 +177,7 @@ export class LibraryBrowser {
   }
 
   private renderList() {
+    this.listEl.classList.remove("lb-settings-list");
     this.listEl.innerHTML = "";
     if (this.isLoading) {
       const li = document.createElement("div");

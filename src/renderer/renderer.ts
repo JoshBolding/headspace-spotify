@@ -565,19 +565,8 @@ function wireSpotifyAuth(onAuthed: () => void): void {
     statusOverlay.classList.remove("show");
   }
 
-  const accountBtn = document.getElementById("btn-account") as HTMLButtonElement;
-
-  async function refreshAccountButton() {
-    const auth = await window.headspace.authStatus();
-    accountBtn.dataset.authenticated = auth.authenticated ? "1" : "0";
-    accountBtn.title = auth.authenticated
-      ? "Spotify account"
-      : "Spotify setup and sign in";
-  }
-
   async function signOutAndReload() {
     await window.headspace.authSignOut();
-    hideStatus();
     window.location.reload();
   }
 
@@ -597,27 +586,33 @@ function wireSpotifyAuth(onAuthed: () => void): void {
     }
   }
 
-  accountBtn.addEventListener("click", async () => {
+  async function renderSpotifySettings(container: HTMLElement) {
+    container.innerHTML = "";
+    const panel = document.createElement("div");
+    panel.className = "settings-panel";
+    const title = document.createElement("div");
+    title.className = "settings-title";
+    title.textContent = "Spotify";
+    const body = document.createElement("div");
+    body.className = "settings-body";
+    const actions = document.createElement("div");
+    actions.className = "settings-actions";
+    panel.append(title, body, actions);
+    container.appendChild(panel);
+
     const auth = await window.headspace.authStatus();
     if (!auth.authenticated) {
-      showStatus(
-        "Spotify setup",
-        "Create a Spotify Developer app, copy its Client ID into .env as SPOTIFY_CLIENT_ID, and add this exact redirect URI in the Spotify dashboard:\n\nhttp://127.0.0.1:8888/callback",
-        {
-          actions: [
-            {
-              label: "Sign in",
-              primary: true,
-              onClick: async () => {
-                const result = await window.headspace.authSignIn({ showDialog: true });
-                if (result.success) window.location.reload();
-                else showStatus("Sign-in failed", result.error ?? "Unknown error.");
-              },
-            },
-            { label: "Close", onClick: hideStatus },
-          ],
-        },
-      );
+      body.textContent =
+        "Not signed in.\n\nAdd SPOTIFY_CLIENT_ID to .env, then sign in with Spotify.\n\nRedirect URI:\nhttp://127.0.0.1:8888/callback";
+      const signIn = document.createElement("button");
+      signIn.className = "primary";
+      signIn.textContent = "Sign in";
+      signIn.addEventListener("click", async () => {
+        const result = await window.headspace.authSignIn({ showDialog: true });
+        if (result.success) window.location.reload();
+        else showStatus("Sign-in failed", result.error ?? "Unknown error.");
+      });
+      actions.append(signIn);
       return;
     }
 
@@ -629,16 +624,22 @@ function wireSpotifyAuth(onAuthed: () => void): void {
       accountLine = `Signed in as ${name}${profile.email ? `\n${profile.email}` : ""}.`;
     }
 
-    showStatus("Spotify account", accountLine, {
-      actions: [
-        { label: "Switch", primary: true, onClick: switchSpotifyAccount },
-        { label: "Sign out", onClick: signOutAndReload },
-        { label: "Close", onClick: hideStatus },
-      ],
+    body.textContent = accountLine;
+
+    const switchBtn = document.createElement("button");
+    switchBtn.className = "primary";
+    switchBtn.textContent = "Switch";
+    switchBtn.addEventListener("click", switchSpotifyAccount);
+    const signOutBtn = document.createElement("button");
+    signOutBtn.textContent = "Sign out";
+    signOutBtn.addEventListener("click", signOutAndReload);
+    const refreshBtn = document.createElement("button");
+    refreshBtn.textContent = "Refresh";
+    refreshBtn.addEventListener("click", () => {
+      void renderSpotifySettings(container);
     });
-  });
-  window.headspace.onAuthChanged(() => void refreshAccountButton());
-  void refreshAccountButton();
+    actions.append(switchBtn, signOutBtn, refreshBtn);
+  }
 
   const transport = await Transport.create(document.getElementById("transport")!, {
     onClick: (btn) => {
@@ -890,7 +891,9 @@ function wireSpotifyAuth(onAuthed: () => void): void {
     await tryInitController();
     void queueView.refresh();
 
-    library = new LibraryBrowser(drawerBody, controller);
+    library = new LibraryBrowser(drawerBody, controller, {
+      renderSettings: renderSpotifySettings,
+    });
     library.setErrorHandler((err) => {
       if (err === "no_device") {
         showStatus(
