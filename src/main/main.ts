@@ -20,6 +20,7 @@ app.commandLine.appendSwitch("autoplay-policy", "no-user-gesture-required");
 const { components } = require("electron") as {
   components?: { whenReady: () => Promise<void>; status: () => unknown };
 };
+const DEBUG_BOOT_LOGS = process.env.HEADSPACE_DEBUG_BOOT === "1";
 import { join, basename } from "path";
 import { pathToFileURL } from "url";
 
@@ -438,20 +439,22 @@ function createWindow() {
 
 async function loadWidevine(): Promise<void> {
   if (!components?.whenReady) {
-    console.warn("[headspace] No components API — using stock Electron.");
+    console.warn("[headspace] No components API - using stock Electron.");
     lastComponentsStatus = { error: "components_api_unavailable" };
     return;
   }
   try {
-    console.log("[headspace] waiting for Widevine components...");
+    if (DEBUG_BOOT_LOGS) console.log("[headspace] waiting for Widevine components...");
     const t0 = Date.now();
     await components.whenReady();
     const elapsed = Date.now() - t0;
     const status = components.status?.();
-    console.log(
-      `[headspace] Widevine components ready in ${elapsed}ms`,
-      JSON.stringify(status, null, 2),
-    );
+    if (DEBUG_BOOT_LOGS) {
+      console.log(
+        `[headspace] Widevine components ready in ${elapsed}ms`,
+        JSON.stringify(status, null, 2),
+      );
+    }
     lastComponentsStatus = status;
   } catch (err) {
     console.warn("[headspace] Widevine components failed:", err);

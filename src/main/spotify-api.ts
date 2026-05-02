@@ -181,16 +181,17 @@ export async function searchTracks(
   limit = 20,
 ): Promise<{ items: LibraryItem[] }> {
   if (!query.trim()) return { items: [] };
-  const params = new URLSearchParams({
-    q: query.trim(),
-    type: "track,playlist",
-    limit: String(limit),
-    market: "from_token",
-  });
+  const safeLimit = Math.max(1, Math.min(20, Math.floor(Number(limit) || 20)));
+  const params = [
+    `q=${encodeURIComponent(query.trim())}`,
+    "type=track,playlist",
+    `limit=${safeLimit}`,
+    "market=from_token",
+  ].join("&");
   const res = await call<{
     tracks?: Paged<SpotifyTrack>;
     playlists?: Paged<SpotifyPlaylist | null>;
-  }>(`/search?${params.toString()}`);
+  }>(`/search?${params}`);
   return {
     items: [
       ...(res.tracks?.items ?? []).map((t) => ({ kind: "track" as const, track: t })),

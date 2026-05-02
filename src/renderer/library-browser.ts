@@ -178,7 +178,7 @@ export class LibraryBrowser {
     }
     this.isLoading = true;
     this.renderList();
-    const result = (await window.headspace.spSearch(this.searchQuery, 30)) as
+    const result = (await window.headspace.spSearch(this.searchQuery, 20)) as
       | {
           items: Array<
             | { kind: "track"; track: SpotifyTrackLite }
