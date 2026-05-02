@@ -21,7 +21,7 @@ This is a fan/nostalgia project and an experiment in bringing old desktop skin c
 
 ## Screenshots
 
-More screenshots live in [docs/screenshots](docs/screenshots).
+More screenshots live in [docs/screenshots](docs/screenshots), with a simple gallery in [docs/SCREENSHOTS.md](docs/SCREENSHOTS.md).
 
 ## Setup
 
@@ -73,6 +73,8 @@ npm run electron:dev
 ## Project Status
 
 Headspace Spotify is shareable as a builder/demo project, but not packaged as a polished public release yet. See [Known Limitations](docs/KNOWN_LIMITATIONS.md) for the current rough edges.
+
+Before posting publicly, use the [Share Checklist](docs/SHARE_CHECKLIST.md).
 
 ## Asset Notice
 
