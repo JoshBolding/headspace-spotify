@@ -685,19 +685,9 @@ export class FaceAlive {
       this.headLightEl.style.setProperty("--head-light", headLight.toFixed(3));
     }
 
-    const lidClose = 1 - values.openness;
-    const lidTopY = -9 + lidClose * 13;
-    const lidBottomY = 5 - lidClose * 2;
-    this.applyEyeVars(this.leftEyeEl, values.eyeGlow, values.openness, lidClose, lidTopY, lidBottomY, values.leftPupil);
-    this.applyEyeVars(
-      this.rightEyeEl,
-      values.eyeGlow,
-      values.openness,
-      lidClose,
-      lidTopY,
-      lidBottomY,
-      values.rightPupil,
-    );
+    const lidClose = values.openness <= 0.05 ? 1 : 1 - values.openness;
+    this.applyEyeVars(this.leftEyeEl, values.eyeGlow, values.openness, lidClose, values.leftPupil);
+    this.applyEyeVars(this.rightEyeEl, values.eyeGlow, values.openness, lidClose, values.rightPupil);
   }
 
   private applyEyeVars(
@@ -705,21 +695,15 @@ export class FaceAlive {
     eyeGlow: number,
     openness: number,
     lidClose: number,
-    lidTopY: number,
-    lidBottomY: number,
     pupil: FaceAlivePupilState,
   ) {
     if (!eyeEl) return;
-    const pupilOpacity = openness <= 0.18 ? 0 : clamp01((openness - 0.18) / 0.32);
     eyeEl.style.setProperty("--eye-glow", eyeGlow.toFixed(3));
     eyeEl.style.setProperty("--eye-beat", "0");
     eyeEl.style.setProperty("--blink-scale", openness.toFixed(3));
     eyeEl.style.setProperty("--lid-close", lidClose.toFixed(3));
-    eyeEl.style.setProperty("--lid-top-y", `${lidTopY.toFixed(2)}px`);
-    eyeEl.style.setProperty("--lid-bottom-y", `${lidBottomY.toFixed(2)}px`);
     eyeEl.style.setProperty("--eye-look-x", `${pupil.x.toFixed(2)}px`);
     eyeEl.style.setProperty("--eye-look-y", `${pupil.y.toFixed(2)}px`);
-    eyeEl.style.setProperty("--pupil-opacity", pupilOpacity.toFixed(3));
   }
 
   private applySpeakerCones(bassEnergy: number, midEnergy: number, highEnergy: number, coneBreathe: number) {
