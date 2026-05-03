@@ -25,6 +25,7 @@
     "electron:dev": "npm run build:main && electron ."
   },
   "devDependencies": {
+    "@playwright/test": "^1.59.1",
     "@types/node": "^22.0.0",
     "electron": "github:castlabs/electron-releases#v41.1.1+wvcus",
     "typescript": "^5.6.0",

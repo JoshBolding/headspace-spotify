@@ -16,7 +16,7 @@ import { LiveAudio } from "./live-audio";
 import { extractPalette, DEFAULT_PALETTE } from "./palette";
 import { THEMES, getTheme, applyTheme, autoThemeFromHue } from "./themes";
 import { STORAGE_KEYS } from "./storage-keys";
-import { FaceAlive } from "./face-alive";
+import { FaceAlive, NOSE_CLICKS_REQUIRED, type FaceAliveDebugApi } from "./face-alive";
 import { attachMediaSession } from "./media-session";
 import { QueueView } from "./queue-view";
 import {
@@ -33,6 +33,7 @@ interface AuthStatus {
 
 declare global {
   interface Window {
+    __faceAlive?: FaceAliveDebugApi;
     headspace: {
       hitTest: (isOverOpaque: boolean) => void;
       minimize: () => void;
@@ -191,10 +192,23 @@ function wireDrag(): void {
   window.addEventListener("blur", end);
 }
 
-function wireKeys(controller: SpotifyController): void {
+function wireKeys(controller: SpotifyController, faceAlive?: FaceAlive): void {
+  const faceAliveDebugEnabled =
+    import.meta.env.DEV ||
+    new URLSearchParams(window.location.search).has("faceDebug") ||
+    localStorage.getItem("faceAliveDebug") === "1";
   document.addEventListener("keydown", (e) => {
     if (e.ctrlKey && e.key.toLowerCase() === "d")
       document.body.classList.toggle("debug");
+    if (
+      !e.ctrlKey &&
+      e.key.toLowerCase() === "d" &&
+      faceAliveDebugEnabled &&
+      faceAlive?.isActive()
+    ) {
+      e.preventDefault();
+      faceAlive.toggleDebugOverlay();
+    }
     if (e.key === "Escape") window.headspace.close();
     if (e.ctrlKey && e.key.toLowerCase() === "t") window.headspace.toggleOnTop();
     if (e.code === "Space") {
@@ -252,7 +266,7 @@ function wireSpotifyAuth(onAuthed: () => void): void {
   // mode (eyes open + glow, ears throb to beat, head sways/bobs). Hidden
   // from any visible UI — discoverable only by playing with it.
   const faceAlive = new FaceAlive();
-  const NOSE_CLICKS_REQUIRED = 5;
+  window.__faceAlive = faceAlive.getDebugApi();
   const NOSE_CLICK_WINDOW_MS = 2000;
   let noseClicks = 0;
   let noseClickResetTimer: number | null = null;
@@ -490,7 +504,7 @@ function wireSpotifyAuth(onAuthed: () => void): void {
   const pauseOverlay = document.getElementById("pause-overlay")!;
 
   const controller = new SpotifyController();
-  wireKeys(controller);
+  wireKeys(controller, faceAlive);
   attachMediaSession(controller);
   const queueView = new QueueView(
     document.getElementById("queue-view")!,
