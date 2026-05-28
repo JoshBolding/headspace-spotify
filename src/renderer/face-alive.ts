@@ -41,9 +41,9 @@ export class FaceAlive {
   private leftEyeEl: HTMLElement | null;
   private rightEyeEl: HTMLElement | null;
   private headLightEl: HTMLElement | null;
-  private bassConeEls: HTMLElement[] = [];
-  private midConeEls: HTMLElement[] = [];
-  private highConeEls: HTMLElement[] = [];
+  private bassConeEls: SVGGElement[] = [];
+  private midConeEls: SVGGElement[] = [];
+  private highConeEls: SVGGElement[] = [];
 
   // Smoothed audio state used only for eye glow and head-light intensity.
   private bassEnv = 0;
@@ -75,9 +75,9 @@ export class FaceAlive {
     this.leftEyeEl = document.getElementById("alive-eye-left");
     this.rightEyeEl = document.getElementById("alive-eye-right");
     this.headLightEl = document.getElementById("alive-head-light");
-    this.bassConeEls = Array.from(document.querySelectorAll<HTMLElement>('.speaker-cone[data-band="bass"]'));
-    this.midConeEls = Array.from(document.querySelectorAll<HTMLElement>('.speaker-cone[data-band="mid"]'));
-    this.highConeEls = Array.from(document.querySelectorAll<HTMLElement>('.speaker-cone[data-band="high"]'));
+    this.bassConeEls = Array.from(document.querySelectorAll<SVGGElement>('.cone[data-band="bass"]'));
+    this.midConeEls = Array.from(document.querySelectorAll<SVGGElement>('.cone[data-band="mid"]'));
+    this.highConeEls = Array.from(document.querySelectorAll<SVGGElement>('.cone[data-band="high"]'));
   }
 
   setLiveAudio(la: LiveAudio | null) {
@@ -340,7 +340,7 @@ function clamp01(value: number): number {
   return Math.max(0, Math.min(1, value));
 }
 
-function setConeVars(els: HTMLElement[], energy: number, beat: number, breathe: number) {
+function setConeVars(els: SVGGElement[], energy: number, beat: number, breathe: number) {
   const e = energy.toFixed(3);
   const b = beat.toFixed(3);
   const br = breathe.toFixed(3);
