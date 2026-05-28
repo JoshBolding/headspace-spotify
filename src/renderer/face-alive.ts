@@ -20,6 +20,14 @@ import type { LiveAudio } from "./live-audio";
 const ACTIVATION_FLOURISH_MS = 1100; // duration of the wake-up animation
 const EYE_WAKE_OPEN_MS = 620;
 const BAND_PEAK_DECAY = 0.992;
+// Speaker-cone beat detector. A "beat" fires when this frame's smoothed
+// envelope rises sharply above the previous frame; the resulting transient
+// scales the cone's pump + ripple, then decays so the speaker visibly
+// recoils between hits instead of riding a smooth sine.
+const CONE_BEAT_DECAY = 0.84;
+const CONE_BEAT_TRIGGER_DELTA = 0.085;
+const CONE_BEAT_MIN_LEVEL = 0.22;
+const CONE_BEAT_GAIN = 3.4;
 
 export class FaceAlive {
   private active = false;
@@ -33,6 +41,9 @@ export class FaceAlive {
   private leftEyeEl: HTMLElement | null;
   private rightEyeEl: HTMLElement | null;
   private headLightEl: HTMLElement | null;
+  private bassConeEls: HTMLElement[] = [];
+  private midConeEls: HTMLElement[] = [];
+  private highConeEls: HTMLElement[] = [];
 
   // Smoothed audio state used only for eye glow and head-light intensity.
   private bassEnv = 0;
@@ -41,6 +52,13 @@ export class FaceAlive {
   private bassPeak = 0.18;
   private midPeak = 0.18;
   private highPeak = 0.18;
+  // Per-band beat transients + previous-frame envelopes for delta detection.
+  private bassBeat = 0;
+  private midBeat = 0;
+  private highBeat = 0;
+  private bassEnvPrev = 0;
+  private midEnvPrev = 0;
+  private highEnvPrev = 0;
   // Wake-up flourish countdown (ms remaining).
   private flourishMsLeft = 0;
   private startedAt = 0;
@@ -57,6 +75,9 @@ export class FaceAlive {
     this.leftEyeEl = document.getElementById("alive-eye-left");
     this.rightEyeEl = document.getElementById("alive-eye-right");
     this.headLightEl = document.getElementById("alive-head-light");
+    this.bassConeEls = Array.from(document.querySelectorAll<HTMLElement>('.speaker-cone[data-band="bass"]'));
+    this.midConeEls = Array.from(document.querySelectorAll<HTMLElement>('.speaker-cone[data-band="mid"]'));
+    this.highConeEls = Array.from(document.querySelectorAll<HTMLElement>('.speaker-cone[data-band="high"]'));
   }
 
   setLiveAudio(la: LiveAudio | null) {
@@ -75,6 +96,8 @@ export class FaceAlive {
     this.bassPeak = 0.18;
     this.midPeak = 0.18;
     this.highPeak = 0.18;
+    this.bassBeat = this.midBeat = this.highBeat = 0;
+    this.bassEnvPrev = this.midEnvPrev = this.highEnvPrev = 0;
     document.body.classList.add("face-alive");
     if (this.rafHandle === null) {
       this.rafHandle = requestAnimationFrame(this.tick);
@@ -91,6 +114,7 @@ export class FaceAlive {
     document.body.classList.remove("face-alive");
     // Reset all transforms so the head returns to its default pose.
     this.applyTransforms(0, 0, 0, 1, 1, 1, 0.08, 0, 0, 0, 0, 0, 0, 0);
+    this.applyConeBands(0, 0, 0, 0, 0, 0, 0, 0, 0);
   }
 
   toggle() {
@@ -137,6 +161,15 @@ export class FaceAlive {
     const midEnergy = clamp01(0.14 + coneBreathMid * 0.18 + this.midEnv * 0.52);
     const highEnergy = clamp01(0.1 + coneBreathHigh * 0.2 + this.highEnv * 0.54);
 
+    // Beat transients: rising-edge spike in each band's smoothed envelope.
+    // Decays exponentially so each pump visibly recoils between hits.
+    this.bassBeat = this.stepBeat(this.bassBeat, this.bassEnv, this.bassEnvPrev);
+    this.midBeat = this.stepBeat(this.midBeat, this.midEnv, this.midEnvPrev);
+    this.highBeat = this.stepBeat(this.highBeat, this.highEnv, this.highEnvPrev);
+    this.bassEnvPrev = this.bassEnv;
+    this.midEnvPrev = this.midEnv;
+    this.highEnvPrev = this.highEnv;
+
     const tx = 0;
     const ty = 0;
     const rot = 0;
@@ -171,9 +204,45 @@ export class FaceAlive {
       Math.max(coneBreathBass, coneBreathMid, coneBreathHigh),
       bodyBreath,
     );
+    this.applyConeBands(
+      bassEnergy,
+      midEnergy,
+      highEnergy,
+      this.bassBeat,
+      this.midBeat,
+      this.highBeat,
+      coneBreathBass,
+      coneBreathMid,
+      coneBreathHigh,
+    );
 
     this.rafHandle = requestAnimationFrame(this.tick);
   };
+
+  private stepBeat(prevBeat: number, env: number, envPrev: number): number {
+    let beat = prevBeat * CONE_BEAT_DECAY;
+    const delta = env - envPrev;
+    if (env > CONE_BEAT_MIN_LEVEL && delta > CONE_BEAT_TRIGGER_DELTA) {
+      beat = Math.max(beat, Math.min(1, delta * CONE_BEAT_GAIN));
+    }
+    return beat;
+  }
+
+  private applyConeBands(
+    bassEnergy: number,
+    midEnergy: number,
+    highEnergy: number,
+    bassBeat: number,
+    midBeat: number,
+    highBeat: number,
+    bassBreathe: number,
+    midBreathe: number,
+    highBreathe: number,
+  ) {
+    setConeVars(this.bassConeEls, bassEnergy, bassBeat, bassBreathe);
+    setConeVars(this.midConeEls, midEnergy, midBeat, midBreathe);
+    setConeVars(this.highConeEls, highEnergy, highBeat, highBreathe);
+  }
 
   private computeBlinkScale(now: number): number {
     const wakeT = Math.min(1, (now - this.startedAt) / EYE_WAKE_OPEN_MS);
@@ -269,4 +338,15 @@ function smooth(previous: number, next: number, attack: number, release: number)
 
 function clamp01(value: number): number {
   return Math.max(0, Math.min(1, value));
+}
+
+function setConeVars(els: HTMLElement[], energy: number, beat: number, breathe: number) {
+  const e = energy.toFixed(3);
+  const b = beat.toFixed(3);
+  const br = breathe.toFixed(3);
+  for (const el of els) {
+    el.style.setProperty("--cone-energy", e);
+    el.style.setProperty("--cone-beat", b);
+    el.style.setProperty("--cone-breathe", br);
+  }
 }

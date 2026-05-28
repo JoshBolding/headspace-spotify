@@ -97,59 +97,87 @@
         transform: scaleX(-1);
         transform-origin: 41px 86px;
       }
+      /* Speaker-cone overlay sits ABOVE the ear bitmap so the pump glow
+         brightens the silver driver art beneath. Uses screen blend so it
+         tints rather than masks the underlying speaker, which makes the
+         effect forgiving of small (sub-pixel) center misalignment. */
       .speaker-cone-layer {
         position: absolute;
         inset: 0;
-        z-index: 2;
+        z-index: 6;
         pointer-events: none;
         opacity: 0;
-        transform: translate(var(--ear-recoil-x), var(--ear-recoil-y)) rotate(var(--ear-tilt));
-        transform-origin: 50% 50%;
         transition: opacity 260ms ease;
-        will-change: transform;
       }
       body.face-alive .speaker-cone-layer {
-        opacity: 0;
+        opacity: 1;
       }
       .speaker-cone {
         position: absolute;
-        width: var(--cone-size, 29px);
-        height: var(--cone-size, 29px);
-        margin-left: calc(var(--cone-size, 29px) / -2);
-        margin-top: calc(var(--cone-size, 29px) / -2);
+        width: var(--cone-size, 30px);
+        height: var(--cone-size, 30px);
+        margin-left: calc(var(--cone-size, 30px) / -2);
+        margin-top: calc(var(--cone-size, 30px) / -2);
         border-radius: 50%;
         --cone-energy: 0;
         --cone-beat: 0;
         --cone-breathe: 0;
-        transform: scale(calc(0.96 + (var(--cone-breathe) * 0.07) + (var(--cone-energy) * 0.25) + (var(--cone-beat) * 0.16)));
-        transform-origin: 50% 50%;
+        /* Concentric tonal rings centered on the driver — reads as cone
+           depth (dark rim, lit cone wall, dark center where dust cap sits)
+           rather than an off-center eye highlight. */
         background:
-          radial-gradient(circle at 38% 32%, rgba(255, 255, 255, calc(0.32 + (var(--cone-energy) * 0.5) + (var(--cone-beat) * 0.16))) 0 9%, transparent 19%),
-          radial-gradient(circle at 50% 52%, rgba(0, 0, 0, calc(0.2 + (var(--cone-energy) * 0.24))) 0 24%, rgba(255, 255, 255, calc(0.1 + (var(--cone-energy) * 0.28))) 25% 43%, rgba(0, 0, 0, calc(0.23 + (var(--cone-energy) * 0.24))) 44% 65%, transparent 71%);
+          radial-gradient(circle at 50% 50%,
+            rgba(0, 0, 0, calc(0.18 + var(--cone-beat) * 0.18)) 0 16%,
+            rgba(255, 255, 255, calc(0.04 + var(--cone-energy) * 0.22 + var(--cone-beat) * 0.18)) 30% 46%,
+            rgba(0, 0, 0, calc(0.14 + var(--cone-energy) * 0.1)) 60% 74%,
+            transparent 92%);
+        transform: scale(calc(1 + var(--cone-breathe) * 0.03 + var(--cone-energy) * 0.06 + var(--cone-beat) * 0.14));
+        transform-origin: 50% 50%;
+        transition: transform 70ms cubic-bezier(0.18, 0.9, 0.32, 1.1);
         box-shadow:
-          inset 0 1px 2px rgba(255, 255, 255, calc(0.22 + (var(--cone-energy) * 0.28))),
-          inset 0 -3px 5px rgba(0, 0, 0, calc(0.28 + (var(--cone-energy) * 0.22))),
-          0 0 12px hsla(var(--theme-hue), 100%, 63%, calc((var(--cone-energy) * 0.54) + (var(--cone-beat) * 0.38)));
-        opacity: calc(0.5 + (var(--cone-energy) * 0.55) + (var(--cone-beat) * 0.2));
-        mix-blend-mode: overlay;
-        will-change: transform, box-shadow;
+          0 0 calc(3px + var(--cone-energy) * 7px + var(--cone-beat) * 11px)
+            hsla(var(--theme-hue), 95%, 62%, calc(var(--cone-energy) * 0.4 + var(--cone-beat) * 0.5));
+        opacity: calc(0.35 + var(--cone-energy) * 0.45 + var(--cone-beat) * 0.25);
+        mix-blend-mode: screen;
+        will-change: transform, opacity, box-shadow;
       }
+      /* Dust cap — small bright disc at the cone's center that bulges
+         forward on each beat. */
+      .speaker-cone::before {
+        content: "";
+        position: absolute;
+        inset: 34%;
+        border-radius: 50%;
+        background: radial-gradient(circle at 50% 40%,
+          rgba(255, 255, 255, calc(0.5 + var(--cone-beat) * 0.4)) 0 32%,
+          rgba(255, 255, 255, calc(0.18 + var(--cone-beat) * 0.22)) 58%,
+          rgba(0, 0, 0, calc(0.28 + var(--cone-energy) * 0.18)) 96%);
+        box-shadow:
+          0 0 calc(2px + var(--cone-beat) * 7px) hsla(var(--theme-hue), 95%, 72%, calc(var(--cone-beat) * 0.6));
+        transform: scale(calc(1 + var(--cone-beat) * 0.22 + var(--cone-energy) * 0.04));
+        mix-blend-mode: screen;
+        transition: transform 70ms cubic-bezier(0.18, 0.9, 0.32, 1.1);
+      }
+      /* Sound-wave ripple that expands on each beat. */
       .speaker-cone::after {
         content: "";
         position: absolute;
-        inset: 21%;
+        inset: 0;
         border-radius: 50%;
-        border: 1px solid rgba(20, 20, 20, 0.34);
-        box-shadow:
-          0 0 0 2px rgba(255, 255, 255, calc(0.13 + (var(--cone-energy) * 0.2))),
-          inset 0 0 4px rgba(0, 0, 0, 0.44);
+        border: 1px solid hsla(var(--theme-hue), 92%, 74%, calc(var(--cone-beat) * 0.55));
+        transform: scale(calc(1 + var(--cone-beat) * 0.6));
+        opacity: calc(1 - var(--cone-beat));
+        mix-blend-mode: screen;
+        transition: transform 70ms ease-out, opacity 70ms ease-out;
       }
       .speaker-cone[data-band="high"] {
-        --cone-size: 28px;
+        --cone-size: 26px;
       }
-      .speaker-cone[data-band="mid"],
-      .speaker-cone[data-band="bass"] {
+      .speaker-cone[data-band="mid"] {
         --cone-size: 30px;
+      }
+      .speaker-cone[data-band="bass"] {
+        --cone-size: 32px;
       }
       #pl-ear .speaker-cone[data-band="high"] { left: 237px; top: 39px; }
       #pl-ear .speaker-cone[data-band="mid"] { left: 220px; top: 86px; }
