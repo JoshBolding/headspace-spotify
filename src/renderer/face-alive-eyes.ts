@@ -37,8 +37,11 @@ export const EYE_BOXES = {
 const APERTURE_CX = 43;
 const APERTURE_CY = 29;
 const APERTURE_RX = 26;
-const TOP_APEX_OPEN = 12.5; // px above center at full open
-const BOT_APEX_OPEN = 8.0; // px below center at full open
+// The opening is intentionally SHORTER than the iris diameter so the lids
+// crop the iris top and bottom — you see a horizontal almond slice of iris
+// with sclera only at the sides, never a full floating disc ("doll eye").
+const TOP_APEX_OPEN = 8.0; // px above center at full open (lid covers iris top)
+const BOT_APEX_OPEN = 9.5; // px below center at full open (iris meets lower lid)
 const CORNER_Y = 0.6; // corners sit a touch below the midline
 const CLOSED_LINE_Y = 4.0; // lid meeting line at closure ≈ painted crease
 // Slight UPWARD outer-corner tilt (canthal tilt) — alert, not droopy. The
