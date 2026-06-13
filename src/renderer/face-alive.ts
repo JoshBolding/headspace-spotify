@@ -224,6 +224,8 @@ export class FaceAlive {
   private drowse = 0;
   private stirUntil = 0;
   private coneTestHoldUntil = 0; // test-only: hold pumped cone excursion
+  private globalTracking = false; // main is polling the OS cursor for us
+  private cursorUnsub: (() => void) | null = null;
 
   constructor() {
     // Transform the wrapper (head + eyes) so eyes stay pinned to the face
@@ -365,10 +367,27 @@ export class FaceAlive {
     this.resetEyeMotion(now);
     this.cacheEyeRects(now, true);
     this.startWakeScript(now);
+    this.startCursorTracking();
     document.body.classList.add("face-alive");
     if (this.rafHandle === null) {
       this.rafHandle = requestAnimationFrame(this.tick);
     }
+  }
+
+  /** Ask main to stream the OS cursor so the eyes can track it off-window. */
+  private startCursorTracking() {
+    const hs = (window as Window).headspace;
+    if (!hs?.setAliveCursorTracking || !hs.onAliveCursor) return;
+    this.globalTracking = true;
+    this.cursorUnsub = hs.onAliveCursor((pos) => this.handleGlobalCursor(pos.x, pos.y));
+    hs.setAliveCursorTracking(true);
+  }
+
+  private stopCursorTracking() {
+    this.globalTracking = false;
+    this.cursorUnsub?.();
+    this.cursorUnsub = null;
+    (window as Window).headspace?.setAliveCursorTracking?.(false);
   }
 
   deactivate() {
@@ -378,6 +397,7 @@ export class FaceAlive {
       cancelAnimationFrame(this.rafHandle);
       this.rafHandle = null;
     }
+    this.stopCursorTracking();
     document.body.classList.remove("face-alive", "face-alive-debug");
     this.debugOverlayVisible = false;
     this.script = null;
@@ -925,17 +945,30 @@ export class FaceAlive {
   }
 
   private handlePointerMove = (e: PointerEvent) => {
+    // Over the window, DOM clientX/clientY and the global cursor feed agree
+    // exactly (same window-relative CSS pixels), so this is redundant while
+    // global tracking is live — but it keeps the eyes working if the global
+    // feed is unavailable (e.g. the face test, which drives a synthetic mouse).
+    this.feedCursor(e.clientX, e.clientY);
+  };
+
+  /** Window-relative cursor from the main-process global poll (any screen pos). */
+  private handleGlobalCursor = (x: number, y: number) => {
+    this.feedCursor(x, y);
+  };
+
+  private feedCursor(clientX: number, clientY: number) {
     const now = performance.now();
     const dt = now - this.lastPointerSampleAt;
-    const dx = e.clientX - this.lastMouseX;
-    const dy = e.clientY - this.lastMouseY;
+    const dx = clientX - this.lastMouseX;
+    const dy = clientY - this.lastMouseY;
     const moved = Math.hypot(dx, dy);
 
     this.mouseInWindow = true;
-    this.mouseX = e.clientX;
-    this.mouseY = e.clientY;
-    this.lastMouseX = e.clientX;
-    this.lastMouseY = e.clientY;
+    this.mouseX = clientX;
+    this.mouseY = clientY;
+    this.lastMouseX = clientX;
+    this.lastMouseY = clientY;
     this.lastPointerSampleAt = now;
 
     if (moved > 0.5) {
@@ -945,9 +978,12 @@ export class FaceAlive {
     if (this.active && dt > 0 && dt < SACCADE_WINDOW_MS && moved > SACCADE_DISTANCE_PX) {
       this.saccadeRequested = true;
     }
-  };
+  }
 
   private handlePointerLeave = () => {
+    // With global cursor tracking we always know where the cursor is, even off
+    // the window, so a window-leave is not a reason to stop tracking.
+    if (this.globalTracking) return;
     this.mouseInWindow = false;
     this.windowLeftAt = performance.now();
     this.saccadeRequested = false;

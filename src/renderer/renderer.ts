@@ -72,6 +72,8 @@ declare global {
       dragStart: (dx: number, dy: number) => void;
       dragEnd: () => void;
       toggleOnTop: () => void;
+      setAliveCursorTracking: (on: boolean) => void;
+      onAliveCursor: (cb: (pos: { x: number; y: number }) => void) => () => void;
 
       authStatus: () => Promise<AuthStatus>;
       authSignIn: (opts?: { showDialog?: boolean }) => Promise<{ success: boolean; error?: string }>;

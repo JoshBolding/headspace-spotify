@@ -26,6 +26,17 @@ contextBridge.exposeInMainWorld("headspace", {
   dragEnd: () => ipcRenderer.send("drag:end"),
   toggleOnTop: () => ipcRenderer.send("window:toggle-on-top"),
 
+  // Global cursor tracking for alive-mode eyes. While enabled, main polls the
+  // OS cursor position (works anywhere on screen, even off the window) and
+  // streams it window-relative so the eyes can follow the cursor everywhere.
+  setAliveCursorTracking: (on: boolean) =>
+    ipcRenderer.send("alive:set-cursor-tracking", on),
+  onAliveCursor: (cb: (pos: { x: number; y: number }) => void) => {
+    const listener = (_evt: unknown, pos: { x: number; y: number }) => cb(pos);
+    ipcRenderer.on("alive:cursor", listener);
+    return () => ipcRenderer.removeListener("alive:cursor", listener);
+  },
+
   // Returns a desktopCapturer screen source ID. Renderer feeds this into
   // getUserMedia({ chromeMediaSource: 'desktop', chromeMediaSourceId }) to
   // capture system-audio loopback without a user-gesture requirement.

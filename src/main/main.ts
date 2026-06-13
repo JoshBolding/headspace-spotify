@@ -155,6 +155,7 @@ function createWindow() {
   let dragGrab: { dx: number; dy: number } | null = null;
   let dragTimer: NodeJS.Timeout | null = null;
   let lastDragPos: { x: number; y: number } | null = null;
+  let aliveCursorTimer: NodeJS.Timeout | null = null;
 
   // Alpha-aware click-through: renderer sends us hit-test results per pointer move.
   // True = forward clicks to whatever is behind; false = window receives clicks normally.
@@ -205,6 +206,31 @@ function createWindow() {
     dragGrab = null;
     lastDragPos = null;
     stopDragTimer();
+  });
+
+  // Global cursor tracking for the alive-mode eyes. The renderer only receives
+  // pointermove events while the cursor is over the window, so on its own the
+  // gaze can't follow the cursor out across the rest of the screen. While
+  // alive mode is active we poll the OS cursor (same API the drag uses) and
+  // stream it window-relative so the eyes can track it anywhere on the display.
+  ipcMain.on("alive:set-cursor-tracking", (_evt, on: boolean) => {
+    if (aliveCursorTimer) {
+      clearInterval(aliveCursorTimer);
+      aliveCursorTimer = null;
+    }
+    if (!on || !win) return;
+    // The face test (and the capture script) drive a SYNTHETIC mouse via DOM
+    // events, which doesn't move the OS cursor — polling the real cursor would
+    // fight it. In those runs, leave the renderer's own pointermove in charge.
+    if (process.env.HEADSPACE_FACE_TEST === "1") return;
+    aliveCursorTimer = setInterval(() => {
+      if (!win || win.isDestroyed()) return;
+      const p = screen.getCursorScreenPoint();
+      const b = win.getBounds();
+      // Window-relative DIP == renderer CSS px, so this maps straight onto
+      // clientX/clientY that the eye-tracking math already expects.
+      win.webContents.send("alive:cursor", { x: p.x - b.x, y: p.y - b.y });
+    }, 16);
   });
 
   ipcMain.on("window:toggle-on-top", () => {
