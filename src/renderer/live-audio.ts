@@ -26,6 +26,7 @@ export class LiveAudio {
   private panner: StereoPannerNode | null = null;
   private freq: Uint8Array | null = null;
   private src: LiveAudioSource | null = null;
+  private tracks: MediaStreamTrack[] = [];
 
   // Spectral-flux onset detector state. Flux = sum of positive bin-deltas
   // between consecutive frames — a much tighter onset signal than raw energy.
@@ -36,6 +37,21 @@ export class LiveAudio {
 
   getSource(): LiveAudioSource | null {
     return this.src;
+  }
+
+  stop(): void {
+    this.tracks.forEach((track) => track.stop());
+    this.tracks = [];
+    if (this.ctx) void this.ctx.close().catch(() => undefined);
+    this.ctx = null;
+    this.analyser = null;
+    this.panner = null;
+    this.freq = null;
+    this.src = null;
+    this.prevSpectrum = null;
+    this.fluxHistory = [];
+    this.lastFluxBeatAt = 0;
+    this.lastFluxOnsetAt = 0;
   }
 
   /**
@@ -61,6 +77,7 @@ export class LiveAudio {
   async tryTap(): Promise<boolean> {
     const audioEl = document.querySelector("audio") as HTMLAudioElement | null;
     if (!audioEl) return false;
+    this.stop();
     let ctx: AudioContext | null = null;
     try {
       ctx = new AudioContext();
@@ -113,6 +130,7 @@ export class LiveAudio {
   async tryLoopback(): Promise<boolean> {
     let stream: MediaStream | null = null;
     try {
+      this.stop();
       const sourceId = await window.headspace.getLoopbackSourceId();
       if (!sourceId) {
         console.warn("[live-audio] no screen source available for loopback");
@@ -143,6 +161,7 @@ export class LiveAudio {
         stream.getTracks().forEach((t) => t.stop());
         return false;
       }
+      this.tracks = audioTracks;
       const ctx = new AudioContext();
       const audioOnlyStream = new MediaStream(audioTracks);
       const source = ctx.createMediaStreamSource(audioOnlyStream);

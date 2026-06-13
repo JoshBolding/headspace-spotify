@@ -246,7 +246,10 @@ export class Visualizer {
     // sources during simultaneous Spotify+Netflix playback), but covers
     // the common "Spotify paused, other audio playing" case.
     const liveFft = this.isPlaying && this.liveAudio ? this.liveAudio.sample() : null;
-    const useLive = liveFft !== null;
+    // A loopback stream can be technically active while delivering silence
+    // (wrong output device, permissions oddity, no system audio yet). Don't let
+    // that suppress the analysis/synthetic fallback, or every mode looks dead.
+    const useLive = liveFft !== null && hasFftEnergy(liveFft);
     let liveIntensity = 0;
     let liveBeat = false;
     let liveOnset = false;
@@ -698,6 +701,15 @@ function fftToBands(fft: Uint8Array, N: number): number[] {
     out[i] = Math.min(1, Math.pow(v, 0.85) * 1.15);
   }
   return out;
+}
+
+function hasFftEnergy(fft: Uint8Array): boolean {
+  let sum = 0;
+  for (let i = 0; i < fft.length; i++) {
+    sum += fft[i];
+    if (sum > 24) return true;
+  }
+  return false;
 }
 
 /**

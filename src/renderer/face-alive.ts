@@ -81,10 +81,14 @@ const DOUBLE_BLINK_CHANCE = 0.05;
 
 // Eye motion limits are deliberately elliptical; horizontal travel is wider
 // than vertical travel so the pupils stay inside the painted sockets.
-const SOCKET_RADIUS_X = 11.5;
+const SOCKET_RADIUS_X = 20.5;
 const SOCKET_RADIUS_Y = 5.8;
+const EYE_REST_OFFSET_Y = 5.0;
+const EYE_MAX_UP_Y = 4.2;
+const EYE_MAX_DOWN_Y = 14.0;
+const EYE_GAZE_CENTER_Y_OFFSET = 10.5;
 const PURSUIT_TIME_CONSTANT_MS = 70;
-const IDLE_AFTER_MOUSE_MS = 1500;
+const IDLE_AFTER_MOUSE_MS = 500;
 const WINDOW_RETURN_MS = 1000;
 const IDLE_FIXATION_RANGE_X = 8.8;
 const IDLE_FIXATION_RANGE_Y = 4.2;
@@ -96,8 +100,8 @@ const SACCADE_DISTANCE_PX = 50;
 const SACCADE_WINDOW_MS = 100;
 const SACCADE_JUMP_RANGE_MS = [24, 52] as const;
 const SACCADE_SETTLE_MS = 58;
-const MICRO_JITTER_RANGE_PX = 1.45;
-const MICRO_JITTER_INTERVAL_RANGE_MS = [45, 115] as const;
+const MICRO_JITTER_RANGE_PX = 1.65;
+const MICRO_JITTER_INTERVAL_RANGE_MS = [80, 120] as const;
 
 const INITIAL_STATE: FaceAliveEyeState = {
   leftOpenness: BLINK_MIN_OPENNESS,
@@ -487,28 +491,29 @@ export class FaceAlive {
 
     const left = this.targetForRect(leftRect, this.mouseX, this.mouseY);
     const right = this.targetForRect(rightRect, this.mouseX, this.mouseY);
-    const averageDistance =
-      (distanceFromRectCenter(leftRect, this.mouseX, this.mouseY) +
-        distanceFromRectCenter(rightRect, this.mouseX, this.mouseY)) /
-      2;
-    const convergence = clamp01(1 - averageDistance / 230) * 1.1;
 
     return {
-      left: clampToSocket({ x: left.x + convergence, y: left.y }),
-      right: clampToSocket({ x: right.x - convergence, y: right.y }),
+      left,
+      right,
     };
   }
 
   private targetForRect(rect: DOMRect, x: number, y: number): FaceAlivePupilState {
-    const cx = rect.left + rect.width / 2;
-    const cy = rect.top + rect.height / 2;
-    const dx = x - cx;
-    const dy = y - cy;
+    const leftRect = this.leftEyeEl?.getBoundingClientRect();
+    const rightRect = this.rightEyeEl?.getBoundingClientRect();
+    const sharedCenterX =
+      leftRect && rightRect
+        ? (leftRect.left + leftRect.width / 2 + rightRect.left + rightRect.width / 2) / 2
+        : rect.left + rect.width / 2;
+    const sharedCenterY = rect.top + rect.height / 2 + EYE_GAZE_CENTER_Y_OFFSET;
+    const dx = x - sharedCenterX;
+    const dy = y - sharedCenterY;
     const dist = Math.max(1, Math.hypot(dx, dy));
     const pull = clamp01(dist / 170);
+    const radiusY = dy < 0 ? EYE_MAX_UP_Y : EYE_MAX_DOWN_Y;
     return clampToSocket({
       x: (dx / dist) * SOCKET_RADIUS_X * pull,
-      y: (dy / dist) * SOCKET_RADIUS_Y * pull,
+      y: (dy / dist) * radiusY * pull,
     });
   }
 
@@ -703,7 +708,7 @@ export class FaceAlive {
     eyeEl.style.setProperty("--blink-scale", openness.toFixed(3));
     eyeEl.style.setProperty("--lid-close", lidClose.toFixed(3));
     eyeEl.style.setProperty("--eye-look-x", `${pupil.x.toFixed(2)}px`);
-    eyeEl.style.setProperty("--eye-look-y", `${pupil.y.toFixed(2)}px`);
+    eyeEl.style.setProperty("--eye-look-y", `${(pupil.y + EYE_REST_OFFSET_Y).toFixed(2)}px`);
   }
 
   private applySpeakerCones(bassEnergy: number, midEnergy: number, highEnergy: number, coneBreathe: number) {
@@ -826,12 +831,9 @@ function randomRange(min: number, max: number): number {
   return min + Math.random() * (max - min);
 }
 
-function distanceFromRectCenter(rect: DOMRect, x: number, y: number): number {
-  return Math.hypot(x - (rect.left + rect.width / 2), y - (rect.top + rect.height / 2));
-}
-
 function clampToSocket(point: FaceAlivePupilState): FaceAlivePupilState {
-  const normalized = Math.hypot(point.x / SOCKET_RADIUS_X, point.y / SOCKET_RADIUS_Y);
+  const radiusY = point.y < 0 ? EYE_MAX_UP_Y : EYE_MAX_DOWN_Y;
+  const normalized = Math.hypot(point.x / SOCKET_RADIUS_X, point.y / radiusY);
   if (normalized <= 1) return { x: point.x, y: point.y };
   return {
     x: point.x / normalized,

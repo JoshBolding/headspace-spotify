@@ -18,7 +18,13 @@ app.commandLine.appendSwitch("autoplay-policy", "no-user-gesture-required");
 // decrypt the audio stream and falls back to Connect mode.
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const { components } = require("electron") as {
-  components?: { whenReady: () => Promise<void>; status: () => unknown };
+  components?: {
+    whenReady: (required?: string[]) => Promise<unknown>;
+    status: () => unknown;
+    updatesEnabled?: boolean;
+    WIDEVINE_CDM_ID?: string;
+    MEDIA_FOUNDATION_WIDEVINE_CDM_ID?: string;
+  };
 };
 const DEBUG_BOOT_LOGS = process.env.HEADSPACE_DEBUG_BOOT === "1";
 import { join, basename } from "path";
@@ -334,9 +340,13 @@ function createWindow() {
     const fsx = await import("node:fs/promises");
     const path = await import("node:path");
     const cacheDirs = [
-      // castlabs writes downloaded components under userData/Components/...
+      // castlabs writes downloaded components under userData/component_crx_cache
+      // and extracts Windows Widevine under MediaFoundationWidevineCdm. Older
+      // experiments used Components/WidevineCdm, so keep those in the reset set.
       path.join(app.getPath("userData"), "Components"),
       path.join(app.getPath("userData"), "WidevineCdm"),
+      path.join(app.getPath("userData"), "MediaFoundationWidevineCdm"),
+      path.join(app.getPath("userData"), "component_crx_cache"),
     ];
     const removed: string[] = [];
     for (const dir of cacheDirs) {
@@ -446,22 +456,36 @@ async function loadWidevine(): Promise<void> {
   try {
     if (DEBUG_BOOT_LOGS) console.log("[headspace] waiting for Widevine components...");
     const t0 = Date.now();
-    await components.whenReady();
+    const required = components.WIDEVINE_CDM_ID
+      ? [components.WIDEVINE_CDM_ID]
+      : undefined;
+    const result = await components.whenReady(required);
     const elapsed = Date.now() - t0;
     const status = components.status?.();
+    const diag = {
+      ready: true,
+      elapsedMs: elapsed,
+      updatesEnabled: components.updatesEnabled,
+      widevineId: components.WIDEVINE_CDM_ID,
+      mediaFoundationWidevineId: components.MEDIA_FOUNDATION_WIDEVINE_CDM_ID,
+      result,
+      status,
+    };
     if (DEBUG_BOOT_LOGS) {
       console.log(
         `[headspace] Widevine components ready in ${elapsed}ms`,
-        JSON.stringify(status, null, 2),
+        JSON.stringify(diag, null, 2),
       );
     }
-    lastComponentsStatus = status;
+    lastComponentsStatus = diag;
   } catch (err) {
     console.warn("[headspace] Widevine components failed:", err);
     const e = err as Error;
     lastComponentsStatus = {
+      ready: false,
       error: String(err),
       name: e?.name,
+      errors: (err as { errors?: unknown }).errors,
       stack: e?.stack?.split("\n").slice(0, 5).join("\n"),
     };
   }

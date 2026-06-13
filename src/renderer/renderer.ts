@@ -10,7 +10,11 @@ import { Visualizer, VIS_MODES, buildSyntheticAnalysis } from "./visualizer";
 import { SkinState } from "./skin-state";
 import { Transport } from "./transport";
 import { SkinSlider } from "./skin-slider";
-import { SpotifyController, type SpotifyState } from "./spotify-player";
+import {
+  SpotifyController,
+  type SpotifyControllerDiagnostics,
+  type SpotifyState,
+} from "./spotify-player";
 import { LibraryBrowser } from "./library-browser";
 import { LiveAudio } from "./live-audio";
 import { extractPalette, DEFAULT_PALETTE } from "./palette";
@@ -29,6 +33,31 @@ interface AuthStatus {
   authenticated: boolean;
   expiresAt?: number;
   scope?: string;
+}
+
+interface ComponentStatus {
+  status?: string;
+  title?: string | null;
+  version?: string | null;
+}
+
+interface WidevineDiag {
+  ready?: boolean;
+  error?: string;
+  name?: string;
+  errors?: unknown;
+  widevineId?: string;
+  result?: ComponentStatus[];
+  status?: Record<string, ComponentStatus>;
+}
+
+interface SystemDiag {
+  electronVersion: string;
+  chromeVersion: string;
+  nodeVersion?: string;
+  platform?: string;
+  userDataPath?: string;
+  components?: WidevineDiag;
 }
 
 declare global {
@@ -89,6 +118,8 @@ declare global {
 const HEAD_W = 234;
 const HEAD_H = 394;
 const HEAD_X = 261;
+const VIEW_W_CLOSED = 549;
+const MINI_SCALE = 0.5;
 const ALPHA_THRESHOLD = 16;
 
 let headMask: Uint8Array | null = null;
@@ -129,8 +160,9 @@ function drawDebugMask(mask: Uint8Array): void {
 
 function isHeadPixel(x: number, y: number): boolean {
   if (!headMask) return false;
-  const hx = Math.floor(x - HEAD_X);
-  const hy = Math.floor(y);
+  const scale = document.body.classList.contains("mini") ? MINI_SCALE : 1;
+  const hx = Math.floor(x / scale - HEAD_X);
+  const hy = Math.floor(y / scale);
   if (hx < 0 || hy < 0 || hx >= HEAD_W || hy >= HEAD_H) return false;
   return headMask[hy * HEAD_W + hx] === 1;
 }
@@ -319,11 +351,20 @@ function wireSpotifyAuth(onAuthed: () => void): void {
     );
   }
 
+  async function reconnectLiveAudio(diagContainer?: HTMLElement): Promise<void> {
+    liveAudio.stop();
+    viz.setLiveAudio(null);
+    faceAlive.setLiveAudio(null);
+    refreshBalanceAvailability();
+    await tryEnableLiveAudio();
+    if (diagContainer) await renderRuntimeDiagnostics(diagContainer);
+  }
+
   // Ctrl+L → manual retry if auto-init failed for some reason.
   document.addEventListener("keydown", (e) => {
     if (e.ctrlKey && e.key.toLowerCase() === "l") {
       e.preventDefault();
-      void tryEnableLiveAudio();
+      void reconnectLiveAudio();
     }
   });
 
@@ -476,19 +517,52 @@ function wireSpotifyAuth(onAuthed: () => void): void {
     eqHandle: document.getElementById("btn-eq-handle")!,
   });
 
+  let miniMode = localStorage.getItem("headspaceMiniMode") === "1";
+  const miniBtn = document.getElementById("btn-mini-mode")!;
+  function applyMiniMode(enabled: boolean) {
+    miniMode = enabled;
+    localStorage.setItem("headspaceMiniMode", enabled ? "1" : "0");
+    if (enabled) skin.closeAll();
+    document.body.classList.toggle("mini", enabled);
+    miniBtn.classList.toggle("active", enabled);
+    miniBtn.title = enabled ? "Exit desk buddy mode" : "Desk buddy mode";
+    window.headspace.setSize(
+      Math.round(VIEW_W_CLOSED * (enabled ? MINI_SCALE : 1)),
+      Math.round(HEAD_H * (enabled ? MINI_SCALE : 1)),
+    );
+  }
+
+  function exitMiniForDrawer() {
+    if (miniMode) applyMiniMode(false);
+  }
+
   // Drawer toggles
   document
     .getElementById("btn-pl-handle")!
-    .addEventListener("click", () => skin.togglePlaylist());
+    .addEventListener("click", () => {
+      exitMiniForDrawer();
+      skin.togglePlaylist();
+    });
   document
     .getElementById("btn-pl-open")!
-    .addEventListener("click", () => skin.togglePlaylist());
+    .addEventListener("click", () => {
+      exitMiniForDrawer();
+      skin.togglePlaylist();
+    });
   document
     .getElementById("btn-eq-handle")!
-    .addEventListener("click", () => skin.toggleEq());
+    .addEventListener("click", () => {
+      exitMiniForDrawer();
+      skin.toggleEq();
+    });
   document
     .getElementById("btn-eq-open")!
-    .addEventListener("click", () => skin.toggleEq());
+    .addEventListener("click", () => {
+      exitMiniForDrawer();
+      skin.toggleEq();
+    });
+  miniBtn.addEventListener("click", () => applyMiniMode(!miniMode));
+  applyMiniMode(miniMode);
 
   // Window controls
   document
@@ -568,6 +642,34 @@ function wireSpotifyAuth(onAuthed: () => void): void {
     statusOverlay.classList.remove("show");
   }
 
+  function playbackErrorText(err: string): string {
+    if (err === "no_device") {
+      return "Open Spotify on your phone, desktop, or web player, then try again.";
+    }
+    if (err.includes("no active unrestricted Spotify device")) {
+      return "Spotify is signed in, but no active playback device is available. Open Spotify somewhere and start/transfer playback once.";
+    }
+    return err;
+  }
+
+  function showPlaybackError(err: string): void {
+    showStatus("Playback error", playbackErrorText(err), { durationMs: 7000 });
+  }
+
+  async function runPlaybackCommand(
+    label: string,
+    command: () => Promise<void>,
+  ): Promise<void> {
+    const startedAt = Date.now();
+    await command();
+    const diag = controller.getDiagnostics();
+    if (diag.lastError && diag.lastCommandAt && diag.lastCommandAt >= startedAt - 50) {
+      showStatus(`${label} failed`, playbackErrorText(diag.lastError), {
+        durationMs: 7000,
+      });
+    }
+  }
+
   async function signOutAndReload() {
     await window.headspace.authSignOut();
     window.location.reload();
@@ -598,9 +700,11 @@ function wireSpotifyAuth(onAuthed: () => void): void {
     title.textContent = "Spotify";
     const body = document.createElement("div");
     body.className = "settings-body";
+    const diagList = document.createElement("dl");
+    diagList.className = "settings-diag";
     const actions = document.createElement("div");
     actions.className = "settings-actions";
-    panel.append(title, body, actions);
+    panel.append(title, body, diagList, actions);
     container.appendChild(panel);
 
     const auth = await window.headspace.authStatus();
@@ -628,6 +732,7 @@ function wireSpotifyAuth(onAuthed: () => void): void {
     }
 
     body.textContent = accountLine;
+    await renderRuntimeDiagnostics(diagList);
 
     const switchBtn = document.createElement("button");
     switchBtn.className = "primary";
@@ -641,15 +746,85 @@ function wireSpotifyAuth(onAuthed: () => void): void {
     refreshBtn.addEventListener("click", () => {
       void renderSpotifySettings(container);
     });
-    actions.append(switchBtn, signOutBtn, refreshBtn);
+    const retrySdkBtn = document.createElement("button");
+    retrySdkBtn.className = "primary";
+    retrySdkBtn.textContent = "Retry SDK";
+    retrySdkBtn.addEventListener("click", async () => {
+      showStatus(
+        "Retrying SDK",
+        "Re-initializing Spotify Web Playback SDK... (up to 15s)",
+        { durationMs: 0 },
+      );
+      await tryInitController();
+      await renderRuntimeDiagnostics(diagList);
+    });
+    const reconnectVizBtn = document.createElement("button");
+    reconnectVizBtn.textContent = "Reconnect Viz";
+    reconnectVizBtn.addEventListener("click", async () => {
+      showStatus(
+        "Reconnecting visualizer",
+        "Refreshing the live audio capture source...",
+        { durationMs: 2500 },
+      );
+      await reconnectLiveAudio(diagList);
+    });
+    const resetDrmBtn = document.createElement("button");
+    resetDrmBtn.textContent = "Reset DRM";
+    resetDrmBtn.addEventListener("click", async () => {
+      showStatus(
+        "Resetting Widevine",
+        "Clearing cached components and reinstalling. This can take 30-60 seconds.",
+        { durationMs: 0 },
+      );
+      await window.headspace.systemResetWidevine();
+      await renderRuntimeDiagnostics(diagList);
+      await tryInitController();
+    });
+    actions.append(
+      retrySdkBtn,
+      reconnectVizBtn,
+      refreshBtn,
+      switchBtn,
+      signOutBtn,
+      resetDrmBtn,
+    );
+  }
+
+  async function renderRuntimeDiagnostics(container: HTMLElement) {
+    container.innerHTML = "";
+    const diag = (await window.headspace.systemDiag()) as SystemDiag;
+    const playback = controller.getDiagnostics();
+    const widevine = summarizeWidevineDiag(diag.components);
+    const rows: Array<[string, string]> = [
+      ["Mode", playback.mode],
+      ["Device", formatDeviceDiag(playback)],
+      ["Viz", liveAudio.getSource() ?? "synthetic"],
+      ["Last", formatLastCommandDiag(playback)],
+      ["Widevine", widevine.failed ? "failed" : widevine.text],
+      ["Runtime", `Electron ${diag.electronVersion}`],
+    ];
+    for (const [label, value] of rows) {
+      const dt = document.createElement("dt");
+      dt.textContent = label;
+      const dd = document.createElement("dd");
+      dd.textContent = value;
+      dd.title = value;
+      container.append(dt, dd);
+    }
   }
 
   const transport = await Transport.create(document.getElementById("transport")!, {
     onClick: (btn) => {
-      if (btn === "play") void controller.togglePlay();
-      else if (btn === "stop") void controller.togglePlay(); // No real "stop" in Spotify
-      else if (btn === "next") void controller.next();
-      else if (btn === "prev") void controller.previous();
+      if (btn === "play") {
+        void runPlaybackCommand("Play", () => controller.togglePlay());
+      } else if (btn === "stop") {
+        // No real "stop" in Spotify; keep the skin button as play/pause.
+        void runPlaybackCommand("Pause", () => controller.togglePlay());
+      } else if (btn === "next") {
+        void runPlaybackCommand("Next", () => controller.next());
+      } else if (btn === "prev") {
+        void runPlaybackCommand("Previous", () => controller.previous());
+      }
       else if (btn === "vis") {
         const next = viz.cycleMode();
         flashVisLabel(Visualizer.labelFor(next));
@@ -829,7 +1004,9 @@ function wireSpotifyAuth(onAuthed: () => void): void {
     const r = seek.getBoundingClientRect();
     const pct = (e.clientX - r.left) / r.width;
     const dur = controller.state().durationMs;
-    if (dur > 0) void controller.seek(pct * dur);
+    if (dur > 0) {
+      void runPlaybackCommand("Seek", () => controller.seek(pct * dur));
+    }
   });
 
   // Once authed, init the controller (SDK first, Connect fallback) and library.
@@ -853,24 +1030,25 @@ function wireSpotifyAuth(onAuthed: () => void): void {
     } else if (result.mode === "connect") {
       nowPlaying.textContent =
         "Connect mode — open Spotify on a device, then pick a track.";
+      // Connect mode plays on another Spotify device, so there is no SDK
+      // <audio> element to tap. Start loopback capture so the visualizers can
+      // react to whatever is actually coming through the speakers.
+      void tryEnableLiveAudio();
       console.warn("[headspace] SDK init failed:", result.error);
       // Pull diag info so the user can see whether Widevine actually loaded.
       const diag = (await window.headspace.systemDiag()) as {
         electronVersion: string;
         chromeVersion: string;
-        components?: unknown;
+        components?: WidevineDiag;
       };
-      const widevine =
-        diag?.components && typeof diag.components === "object"
-          ? JSON.stringify(diag.components)
-          : "no info";
-      const widevineFailed =
-        widevine.includes("error") || widevine === "no info" || widevine === "{}";
+      const componentSummary = summarizeWidevineDiag(diag.components);
+      const widevineFailed = componentSummary.failed;
+      const sdkError = result.error ?? "unknown";
       showStatus(
         widevineFailed ? "Widevine install failed" : "In-app playback unavailable",
         widevineFailed
-          ? `Spotify needs Widevine DRM to stream in-app, but the install failed:\n\n${widevine}\n\nLikely causes: Windows Defender / antivirus blocking the download, or a stuck partial install. Reset wipes the cache and retries cleanly.`
-          : `SDK error: ${result.error ?? "unknown"}\n\nElectron ${diag?.electronVersion} (Chromium ${diag?.chromeVersion})\nWidevine: ${widevine}\n\nFalling back to Connect mode.`,
+          ? `Spotify needs Widevine DRM to stream in-app, but the component setup failed:\n\n${componentSummary.text}\n\nLikely causes: Windows Defender / antivirus blocking the download, or a stuck partial install. Reset wipes the cache and retries cleanly.`
+          : `SDK error: ${sdkError}\n\nElectron ${diag?.electronVersion} (Chromium ${diag?.chromeVersion})\nWidevine: ${componentSummary.text}\n\nFalling back to Connect mode.`,
         {
           durationMs: 0,
           actions: widevineFailed
@@ -937,16 +1115,9 @@ function wireSpotifyAuth(onAuthed: () => void): void {
       },
     });
     library.setErrorHandler((err) => {
-      if (err === "no_device") {
-        showStatus(
-          "No active Spotify device",
-          "Open the Spotify app on your phone, desktop, or web player. As soon as it's open, click the track here again.",
-          { durationMs: 8000 },
-        );
-      } else {
-        showStatus("Playback error", err, { durationMs: 6000 });
-      }
+      showPlaybackError(err);
     });
+    queueView.setErrorHandler(showPlaybackError);
     void library;
     setTimeout(() => skin.togglePlaylist(), 600);
   }
@@ -957,6 +1128,62 @@ function wireSpotifyAuth(onAuthed: () => void): void {
     "[headspace] v2 ready · Space=play/pause · Esc=quit · Ctrl+T=on-top · Ctrl+D=mask · Ctrl+L=live audio",
   );
 })();
+
+function summarizeWidevineDiag(diag?: WidevineDiag): { failed: boolean; text: string } {
+  if (!diag) return { failed: true, text: "No component diagnostic available." };
+  if (diag.error || diag.ready === false) {
+    const details = diag.errors ? `\n${JSON.stringify(diag.errors)}` : "";
+    return {
+      failed: true,
+      text: `${diag.name ? `${diag.name}: ` : ""}${diag.error ?? "not ready"}${details}`,
+    };
+  }
+
+  const records: ComponentStatus[] = [
+    ...(Array.isArray(diag.result) ? diag.result : []),
+    ...Object.values(diag.status ?? {}),
+  ];
+  const widevine = records.find((record) => {
+    const title = record.title?.toLowerCase() ?? "";
+    return title.includes("widevine") || !!record.version;
+  });
+
+  if (widevine?.version) {
+    const status = widevine.status ? `${widevine.status}, ` : "";
+    return {
+      failed: false,
+      text: `${widevine.title ?? "Widevine"} (${status}version ${widevine.version})`,
+    };
+  }
+
+  if (diag.ready === true) {
+    return {
+      failed: false,
+      text: "Component loader reported ready, but did not return a Widevine version.",
+    };
+  }
+
+  return {
+    failed: true,
+    text: "Widevine component status was empty before setup completed.",
+  };
+}
+
+function formatDeviceDiag(diag: SpotifyControllerDiagnostics): string {
+  if (diag.deviceName) {
+    return `${diag.deviceName}${diag.deviceType ? ` (${diag.deviceType})` : ""}`;
+  }
+  if (diag.deviceId) return `active (${diag.deviceId.slice(0, 6)}...)`;
+  return diag.mode === "sdk" ? "Headspace starting" : "auto / none active";
+}
+
+function formatLastCommandDiag(diag: SpotifyControllerDiagnostics): string {
+  if (diag.lastError) {
+    return `${diag.lastCommand ?? "command"} failed: ${diag.lastError}`;
+  }
+  if (diag.lastCommand) return `${diag.lastCommand} OK`;
+  return "none";
+}
 
 /** Replaces the EQ panel grid with Volume + Balance sliders + Queue placeholder. */
 function setupQueueDrawerStub() {

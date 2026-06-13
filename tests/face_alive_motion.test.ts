@@ -36,8 +36,9 @@ declare global {
 
 const REPO_ROOT = path.resolve(__dirname, "..");
 const ARTIFACT_DIR = path.join(REPO_ROOT, ".test-artifacts");
-const MAX_SOCKET_RADIUS_X = 11.5;
-const MAX_SOCKET_RADIUS_Y = 5.8;
+const MAX_SOCKET_RADIUS_X = 20.5;
+const MAX_SOCKET_RADIUS_UP_Y = 4.1;
+const MAX_SOCKET_RADIUS_DOWN_Y = 7.8;
 const EYE_CLIP = { x: 285, y: 245, width: 190, height: 70 };
 
 test.setTimeout(120_000);
@@ -183,7 +184,8 @@ function findBlinkSegments(samples: EyeSample[]): EyeSample[][] {
 
 function assertPupilsInSocket(state: EyeState): void {
   for (const pupil of [state.leftPupil, state.rightPupil]) {
-    const normalized = Math.hypot(pupil.x / MAX_SOCKET_RADIUS_X, pupil.y / MAX_SOCKET_RADIUS_Y);
+    const maxY = pupil.y < 0 ? MAX_SOCKET_RADIUS_UP_Y : MAX_SOCKET_RADIUS_DOWN_Y;
+    const normalized = Math.hypot(pupil.x / MAX_SOCKET_RADIUS_X, pupil.y / maxY);
     expect(normalized, "pupil remains inside socket ellipse").toBeLessThanOrEqual(1.02);
   }
 }

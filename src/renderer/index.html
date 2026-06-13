@@ -32,6 +32,7 @@
         /* Hue used by hsla() accent colors throughout the UI. Changed by
            themes.ts on theme switch. 95° = lime green default. */
         --theme-hue: 95;
+        --mini-scale: 0.5;
       }
 
       html,
@@ -53,6 +54,11 @@
         position: relative;
         width: 100%;
         height: var(--view-h);
+      }
+      body.mini #stage {
+        width: var(--view-w-closed);
+        transform: scale(var(--mini-scale));
+        transform-origin: top left;
       }
 
       /* === Ears (behind head) ============================================ */
@@ -723,6 +729,61 @@
         cursor: default;
         opacity: 0.8;
       }
+      .lb-playlist-header {
+        position: sticky;
+        top: 0;
+        z-index: 1;
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        padding: 4px 3px 6px;
+        background:
+          linear-gradient(to bottom, rgba(7, 31, 0, 0.96), rgba(7, 31, 0, 0.86)),
+          var(--skin-green-dark);
+        border-bottom: 1px solid hsla(var(--theme-hue), 65%, 55%, 0.18);
+      }
+      .lb-playlist-title {
+        min-width: 0;
+        flex: 1;
+        font-size: 9px;
+        font-weight: 700;
+        color: hsl(var(--theme-hue), 80%, 86%);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .lb-mini-btn,
+      .lb-more {
+        appearance: none;
+        -webkit-appearance: none;
+        border: 1px solid hsla(var(--theme-hue), 65%, 55%, 0.34);
+        border-radius: 3px;
+        background: rgba(6, 22, 0, 0.34);
+        color: hsla(var(--theme-hue), 75%, 82%, 0.86);
+        font-family: inherit;
+        font-size: 7px;
+        font-weight: 700;
+        letter-spacing: 0.04em;
+        cursor: pointer;
+      }
+      .lb-mini-btn {
+        height: 18px;
+        padding: 0 5px;
+      }
+      .lb-mini-primary {
+        background: #1ed760;
+        border-color: #1ed760;
+        color: #061600;
+      }
+      .lb-more {
+        width: calc(100% - 6px);
+        margin: 5px 3px 2px;
+        padding: 5px 4px;
+      }
+      .lb-more:disabled {
+        cursor: default;
+        opacity: 0.65;
+      }
       .lb-empty {
         padding: 14px 10px;
         font-size: 10px;
@@ -750,6 +811,30 @@
         line-height: 1.35;
         color: hsla(var(--theme-hue), 75%, 76%, 0.78);
         white-space: pre-wrap;
+      }
+      .settings-diag {
+        display: grid;
+        grid-template-columns: 46px 1fr;
+        gap: 3px 6px;
+        padding: 5px 6px;
+        background: rgba(2, 12, 0, 0.36);
+        border: 1px solid hsla(var(--theme-hue), 65%, 55%, 0.18);
+        border-radius: 3px;
+        font-size: 8px;
+        line-height: 1.25;
+        color: hsla(var(--theme-hue), 75%, 78%, 0.82);
+      }
+      .settings-diag dt {
+        margin: 0;
+        color: hsla(var(--theme-hue), 75%, 86%, 0.58);
+        text-transform: uppercase;
+      }
+      .settings-diag dd {
+        margin: 0;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
       }
       .settings-actions {
         display: flex;
@@ -1137,6 +1222,7 @@
         height: 46px;
         object-fit: fill;
         transform: translate(calc(var(--eye-look-x) + var(--iris-offset-x)), var(--eye-look-y));
+        z-index: 1;
         filter:
           var(--theme-filter)
           saturate(calc(0.92 + (var(--eye-glow) * 0.12)))
@@ -1150,7 +1236,8 @@
         width: 70px;
         height: 38px;
         object-fit: fill;
-        filter: var(--theme-filter) saturate(1.03) brightness(0.98);
+        z-index: 3;
+        filter: var(--theme-filter) saturate(1.14) brightness(1.18) contrast(0.9);
         will-change: transform;
       }
       .eyelid-top-bitmap {
@@ -1158,6 +1245,35 @@
       }
       .eyelid-bottom-bitmap {
         transform: translateY(calc(28px - (var(--lid-close) * 28px)));
+      }
+      .alive-eye::before,
+      .alive-eye::after {
+        content: "";
+        position: absolute;
+        left: -4px;
+        width: 78px;
+        pointer-events: none;
+        z-index: 4;
+        opacity: calc(var(--lid-close) * 0.92);
+        background:
+          radial-gradient(ellipse at 50% 50%, hsla(var(--theme-hue), 100%, 58%, 0.46), transparent 70%),
+          linear-gradient(to bottom, hsl(var(--theme-hue), 94%, 36%), hsl(var(--theme-hue), 92%, 21%));
+        filter: var(--theme-filter) saturate(1.08) brightness(0.98);
+        will-change: transform, opacity;
+      }
+      .alive-eye::before {
+        top: 0;
+        height: 23px;
+        border-radius: 0 0 52% 52%;
+        transform: translateY(calc(-24px + (var(--lid-close) * 20px)));
+        box-shadow: 0 2px 4px rgba(0, 0, 0, calc(var(--lid-close) * 0.42));
+      }
+      .alive-eye::after {
+        bottom: 0;
+        height: 20px;
+        border-radius: 52% 52% 0 0;
+        transform: translateY(calc(24px - (var(--lid-close) * 24px)));
+        box-shadow: 0 -1px 3px rgba(0, 0, 0, calc(var(--lid-close) * 0.24));
       }
       #alive-eye-left {
         left: 29px;
@@ -1485,6 +1601,13 @@
       #btn-close {
         left: calc(var(--head-x) + 213px);
       }
+      #btn-mini-mode {
+        left: calc(var(--head-x) + 179px);
+      }
+      #btn-mini-mode.active {
+        background: rgba(94, 154, 20, 0.9);
+        border-color: hsla(var(--theme-hue), 80%, 72%, 0.95);
+      }
       #btn-close:hover {
         background: rgba(140, 30, 30, 0.85);
         border-color: rgba(255, 150, 150, 0.95);
@@ -1717,6 +1840,11 @@
       <div id="pause-overlay" hidden></div>
 
       <!-- Window + drawer controls -->
+      <div class="winctl" id="btn-mini-mode" title="Desk buddy mode" data-opaque="1">
+        <svg viewBox="0 0 8 8">
+          <rect x="2" y="2" width="4" height="4" />
+        </svg>
+      </div>
       <div class="winctl" id="btn-minimize" title="Minimize" data-opaque="1">
         <svg viewBox="0 0 8 8"><line x1="1" y1="6" x2="7" y2="6" /></svg>
       </div>

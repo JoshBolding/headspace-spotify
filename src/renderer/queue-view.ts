@@ -24,6 +24,7 @@ export class QueueView {
   private loading = false;
   private refreshTimer: number | null = null;
   private lastTrackId: string | null = null;
+  private onError: ((err: string) => void) | null = null;
 
   constructor(container: HTMLElement, controller: SpotifyController) {
     this.container = container;
@@ -42,6 +43,10 @@ export class QueueView {
 
   dispose() {
     if (this.refreshTimer !== null) window.clearInterval(this.refreshTimer);
+  }
+
+  setErrorHandler(fn: (err: string) => void) {
+    this.onError = fn;
   }
 
   async refresh() {
@@ -122,8 +127,10 @@ export class QueueView {
     const row = document.createElement("button");
     row.className = current ? "qv-row qv-current" : "qv-row";
     row.title = current ? "Currently playing" : "Play this item";
-    row.addEventListener("click", () => {
-      if (!current) void this.controller.playTrack(item.uri);
+    row.addEventListener("click", async () => {
+      if (current) return;
+      const result = await this.controller.playTrack(item.uri);
+      if (!result.ok) this.onError?.(result.error);
     });
 
     const thumbUrl = item.album?.images?.at(-1)?.url ?? item.images?.at(-1)?.url ?? item.show?.images?.at(-1)?.url;

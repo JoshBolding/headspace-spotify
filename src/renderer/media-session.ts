@@ -14,6 +14,8 @@
 import type { SpotifyController, SpotifyState } from "./spotify-player";
 
 interface BoundController {
+  play(): Promise<void>;
+  pause(): Promise<void>;
   togglePlay(): Promise<void>;
   next(): Promise<void>;
   previous(): Promise<void>;
@@ -28,6 +30,8 @@ export function attachMediaSession(controller: SpotifyController): void {
   const ms = navigator.mediaSession;
 
   const bound: BoundController = {
+    play: () => controller.play(),
+    pause: () => controller.pause(),
     togglePlay: () => controller.togglePlay(),
     next: () => controller.next(),
     previous: () => controller.previous(),
@@ -35,8 +39,8 @@ export function attachMediaSession(controller: SpotifyController): void {
   };
 
   // Action handlers — Chromium calls these when SMTC buttons / media keys are hit.
-  ms.setActionHandler("play", () => void bound.togglePlay());
-  ms.setActionHandler("pause", () => void bound.togglePlay());
+  ms.setActionHandler("play", () => void bound.play());
+  ms.setActionHandler("pause", () => void bound.pause());
   ms.setActionHandler("nexttrack", () => void bound.next());
   ms.setActionHandler("previoustrack", () => void bound.previous());
   ms.setActionHandler("seekto", (details) => {
