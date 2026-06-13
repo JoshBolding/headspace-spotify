@@ -44,9 +44,10 @@ const TOP_APEX_OPEN = 8.0; // px above center at full open (lid covers iris top)
 const BOT_APEX_OPEN = 9.5; // px below center at full open (iris meets lower lid)
 const CORNER_Y = 0.6; // corners sit a touch below the midline
 const CLOSED_LINE_Y = 4.0; // lid meeting line at closure ≈ painted crease
-// Slight UPWARD outer-corner tilt (canthal tilt) — alert, not droopy. The
-// outer corner of each eye is raised relative to the inner corner.
-const TILT_DEG = { left: 2.0, right: -2.0 } as const;
+// Strong UPWARD outer-corner tilt to match the head's painted sockets, which
+// sweep up hard toward the temples (the angled, menacing alien look). The
+// outer corner of each eye rides well above the inner corner.
+const TILT_DEG = { left: 8.0, right: -8.0 } as const;
 
 // Lid–gaze coupling: the upper lid rides the eyeball. Looking down drops the
 // lid; looking up retracts it. The strongest "alive" cue in the rig.
