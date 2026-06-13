@@ -98,10 +98,13 @@ const BLINK_MIN_OPENNESS = 0.03;
 const DOUBLE_BLINK_CHANCE = 0.05;
 
 // Eye motion limits are deliberately elliptical; horizontal travel is wider
-// than vertical travel so the pupils stay inside the painted sockets.
+// than vertical travel so the pupils stay inside the painted sockets. The
+// downward limit is capped so the iris stays visible (cropped by the lower
+// lid, "half eyeball") when looking down — beyond ~7px the iris center sinks
+// below the lower lid and the eyeball vanishes into the socket.
 const SOCKET_RADIUS_X = 20.5;
 const EYE_MAX_UP_Y = 4.2;
-const EYE_MAX_DOWN_Y = 14.0;
+const EYE_MAX_DOWN_Y = 7.0;
 const EYE_GAZE_CENTER_Y_OFFSET = 10.5;
 const PURSUIT_TIME_CONSTANT_MS = 70;
 const IDLE_AFTER_MOUSE_MS = 500;

@@ -41,7 +41,7 @@ const ARTIFACT_DIR = path.join(REPO_ROOT, ".test-artifacts");
 // are the exact bounds the gaze is held within.
 const MAX_SOCKET_RADIUS_X = 20.5;
 const MAX_SOCKET_RADIUS_UP_Y = 4.2;
-const MAX_SOCKET_RADIUS_DOWN_Y = 14.0;
+const MAX_SOCKET_RADIUS_DOWN_Y = 7.0;
 const EYE_CLIP = { x: 285, y: 245, width: 190, height: 70 };
 
 test.setTimeout(120_000);
