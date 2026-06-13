@@ -35,6 +35,22 @@ export class LiveAudio {
   private lastFluxBeatAt = 0;
   private lastFluxOnsetAt = 0;
 
+  // Per-frame result cache. The visualizer and FaceAlive each run their own
+  // rAF loop and both consume checkBeat/checkOnset; without this guard the
+  // second caller would push a near-zero flux delta into the history every
+  // frame and halve the detector's sensitivity. Calls within the same ~frame
+  // window share one flux update and see the same beat/onset answer.
+  private frameAt = -Infinity;
+  private frameBeat = false;
+  private frameOnset = false;
+  private frameDrop = false;
+
+  // Drop detector state: rolling broadband energy so we can recognize
+  // "loud onset right after a quiet stretch".
+  private energyEnv = 0;
+  private energyHistory: Array<{ t: number; e: number }> = [];
+  private lastDropAt = 0;
+
   getSource(): LiveAudioSource | null {
     return this.src;
   }
@@ -52,6 +68,24 @@ export class LiveAudio {
     this.fluxHistory = [];
     this.lastFluxBeatAt = 0;
     this.lastFluxOnsetAt = 0;
+    this.frameAt = -Infinity;
+    this.frameBeat = false;
+    this.frameOnset = false;
+    this.frameDrop = false;
+    this.energyEnv = 0;
+    this.energyHistory = [];
+    this.lastDropAt = 0;
+  }
+
+  /**
+   * Audio graph access for consumers that need to attach their own analysis
+   * (butterchurn renders from a node, not from our byte snapshots). The
+   * analyser is a pass-through node, so connecting downstream of it is safe
+   * for both the tap path (it already feeds the panner) and loopback.
+   */
+  getAudioGraph(): { ctx: AudioContext; node: AudioNode } | null {
+    if (!this.ctx || !this.analyser) return null;
+    return { ctx: this.ctx, node: this.analyser };
   }
 
   /**
@@ -220,13 +254,33 @@ export class LiveAudio {
   }
 
   /**
-   * Spectral-flux beat detector with adaptive threshold. Fires on percussive
-   * onsets — kicks, snares, plucks. Refractory 130ms.
+   * Run the per-frame analysis exactly once per render frame, no matter how
+   * many consumers ask. Computes flux, beat, onset, and drop flags.
    */
-  checkBeat(): boolean {
-    if (!this.freq) return false;
+  private ensureFrame(): void {
+    const now = performance.now();
+    if (now - this.frameAt < 4) return; // same frame — reuse cached flags
+    this.frameAt = now;
+    this.frameBeat = false;
+    this.frameOnset = false;
+    this.frameDrop = false;
+    if (!this.freq) return;
+
     const flux = this.updateFlux();
-    if (this.fluxHistory.length < 12) return false;
+
+    // Broadband energy envelope for the drop detector (cheap mean of the
+    // lower 60% of bins — same usable range the visualizer reads).
+    const usable = Math.floor(this.freq.length * 0.6);
+    let sum = 0;
+    for (let i = 0; i < usable; i++) sum += this.freq[i];
+    const energy = sum / usable / 255;
+    this.energyEnv += (energy - this.energyEnv) * (energy > this.energyEnv ? 0.4 : 0.08);
+    this.energyHistory.push({ t: now, e: this.energyEnv });
+    while (this.energyHistory.length && now - this.energyHistory[0].t > 3000) {
+      this.energyHistory.shift();
+    }
+
+    if (this.fluxHistory.length < 12) return;
     let avg = 0;
     let max = 0;
     for (const v of this.fluxHistory) {
@@ -234,7 +288,7 @@ export class LiveAudio {
       if (v > max) max = v;
     }
     avg /= this.fluxHistory.length;
-    const now = performance.now();
+
     // Beat: flux > avg * 1.55 AND > 30% of recent peak. The peak factor
     // suppresses spurious fires during quiet sections where avg drops low.
     if (
@@ -244,31 +298,61 @@ export class LiveAudio {
       now - this.lastFluxBeatAt > 130
     ) {
       this.lastFluxBeatAt = now;
-      return true;
+      this.frameBeat = true;
     }
-    return false;
+
+    // Onset: lower threshold, shorter refractory — catches hi-hats, vocal
+    // consonants, plucks between detected beats.
+    if (flux > avg * 1.22 && flux > 18 && now - this.lastFluxOnsetAt > 70) {
+      this.lastFluxOnsetAt = now;
+      this.frameOnset = true;
+    }
+
+    // Drop: a hard beat landing while current energy is high but the stretch
+    // 0.6–2.5s ago was much quieter — the build-up/silence before the hit.
+    if (this.frameBeat && flux > avg * 2.1 && now - this.lastDropAt > 8000) {
+      let priorSum = 0;
+      let priorCount = 0;
+      for (const h of this.energyHistory) {
+        const age = now - h.t;
+        if (age > 600 && age < 2500) {
+          priorSum += h.e;
+          priorCount++;
+        }
+      }
+      const prior = priorCount > 8 ? priorSum / priorCount : Infinity;
+      if (this.energyEnv > 0.22 && prior < this.energyEnv * 0.55) {
+        this.lastDropAt = now;
+        this.frameDrop = true;
+      }
+    }
   }
 
   /**
-   * Looser flux-based onset detector. Same flux signal but a lower threshold
-   * and shorter refractory — catches hi-hats, vocal consonants, plucks
-   * between detected beats.
+   * Spectral-flux beat detector with adaptive threshold. Fires on percussive
+   * onsets — kicks, snares, plucks. Refractory 130ms. Frame-cached: all
+   * consumers in the same frame see the same answer.
    */
-  checkOnset(): boolean {
-    if (!this.freq) return false;
-    if (this.fluxHistory.length < 8) return false;
-    const flux = this.fluxHistory[this.fluxHistory.length - 1];
-    let avg = 0;
-    for (const v of this.fluxHistory) avg += v;
-    avg /= this.fluxHistory.length;
-    const now = performance.now();
-    if (flux > avg * 1.22 && flux > 18 && now - this.lastFluxOnsetAt > 70) {
-      this.lastFluxOnsetAt = now;
-      return true;
-    }
-    return false;
+  checkBeat(): boolean {
+    this.ensureFrame();
+    return this.frameBeat;
   }
 
+  /** Looser flux-based onset detector (frame-cached, see checkBeat). */
+  checkOnset(): boolean {
+    this.ensureFrame();
+    return this.frameOnset;
+  }
+
+  /**
+   * "The drop" detector: a hard percussive hit arriving right after a
+   * markedly quieter stretch. Fires rarely (8s refractory) — meant for
+   * one-shot theatrical reactions, not steady-state animation.
+   */
+  checkDrop(): boolean {
+    this.ensureFrame();
+    return this.frameDrop;
+  }
 }
 
 function sleep(ms: number): Promise<void> {

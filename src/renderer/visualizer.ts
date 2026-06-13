@@ -56,6 +56,7 @@ export type VisMode =
   | "particles"
   | "rings"
   | "spectro"
+  | "milkdrop"
   | "cover";
 export const VIS_MODES: VisMode[] = [
   "bars",
@@ -63,6 +64,7 @@ export const VIS_MODES: VisMode[] = [
   "particles",
   "rings",
   "spectro",
+  "milkdrop",
   "cover",
 ];
 
@@ -72,6 +74,7 @@ const VIS_MODE_LABEL: Record<VisMode, string> = {
   particles: "Particles",
   rings: "Rings",
   spectro: "Spectrogram",
+  milkdrop: "Milkdrop",
   cover: "Cover Art",
 };
 
@@ -229,6 +232,14 @@ export class Visualizer {
 
   private draw() {
     const g = this.ctx;
+    // Milkdrop renders on its own WebGL canvas (ButterchurnViz) layered above.
+    // Just keep a clean dark backdrop here so an un-rendered (no-audio)
+    // butterchurn canvas shows a clean screen + idle hint, not a frozen frame.
+    if (this.mode === "milkdrop") {
+      g.fillStyle = "#0d2410";
+      g.fillRect(0, 0, W, H);
+      return;
+    }
     g.fillStyle = "#0d2410";
     g.fillRect(0, 0, W, H);
 

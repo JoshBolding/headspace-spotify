@@ -6,7 +6,8 @@
  * is unchanged from v1; the audio engine and library are entirely new.
  */
 
-import { Visualizer, VIS_MODES, buildSyntheticAnalysis } from "./visualizer";
+import { Visualizer, VIS_MODES, buildSyntheticAnalysis, type VisMode } from "./visualizer";
+import { ButterchurnViz } from "./butterchurn-viz";
 import { SkinState } from "./skin-state";
 import { Transport } from "./transport";
 import { SkinSlider } from "./skin-slider";
@@ -293,6 +294,61 @@ function wireSpotifyAuth(onAuthed: () => void): void {
   const viz = new Visualizer(vizCanvas);
   const liveAudio = new LiveAudio();
 
+  // Milkdrop (butterchurn) WebGL visualizer. Lazy-inits against the live
+  // audio graph the first time the mode is shown with audio available.
+  const bcCanvas = document.getElementById("butterchurn-canvas") as HTMLCanvasElement;
+  const bcViz = new ButterchurnViz(bcCanvas);
+  let bcDropRaf: number | null = null;
+  let bcPresetTimer: number | null = null;
+
+  /** Attach butterchurn to the live audio graph if we have one and haven't yet. */
+  async function ensureButterchurn(): Promise<boolean> {
+    if (bcViz.isReady()) return true;
+    if (bcViz.hasFailed()) return false;
+    const graph = liveAudio.getAudioGraph();
+    if (!graph) return false;
+    return bcViz.init(graph.ctx, graph.node);
+  }
+
+  /** React loop while milkdrop is active: preset switches on drops + a timer. */
+  function startMilkdropDrivers(): void {
+    stopMilkdropDrivers();
+    const poll = () => {
+      if (bcViz.isReady() && liveAudio.checkDrop()) bcViz.onDrop();
+      bcDropRaf = requestAnimationFrame(poll);
+    };
+    bcDropRaf = requestAnimationFrame(poll);
+    bcPresetTimer = window.setInterval(() => {
+      if (bcViz.isReady()) bcViz.nextPreset();
+    }, 28_000);
+  }
+
+  function stopMilkdropDrivers(): void {
+    if (bcDropRaf !== null) cancelAnimationFrame(bcDropRaf);
+    bcDropRaf = null;
+    if (bcPresetTimer !== null) window.clearInterval(bcPresetTimer);
+    bcPresetTimer = null;
+  }
+
+  /** Show/hide milkdrop UI + manage the WebGL render loop for a given mode. */
+  async function applyVisModeUI(mode: VisMode): Promise<void> {
+    const isMilkdrop = mode === "milkdrop";
+    document.body.classList.toggle("vis-milkdrop", isMilkdrop);
+    if (isMilkdrop) {
+      const ok = await ensureButterchurn();
+      document.body.classList.toggle("milkdrop-idle", !ok);
+      if (ok) {
+        bcViz.resize();
+        bcViz.start();
+        startMilkdropDrivers();
+      }
+    } else {
+      bcViz.stop();
+      stopMilkdropDrivers();
+      document.body.classList.remove("milkdrop-idle");
+    }
+  }
+
   // ---------- Easter-egg: alive-face mode ----------
   // 5 left-clicks on the nose hitbox within 2s toggles the head's "alive"
   // mode (eyes open + glow, ears throb to beat, head sways/bobs). Hidden
@@ -318,6 +374,10 @@ function wireSpotifyAuth(onAuthed: () => void): void {
       }
       faceAlive.toggle();
       flashVisLabel(faceAlive.isActive() ? "★ Alive Mode" : "☆ Sleep");
+    } else if (faceAlive.isActive()) {
+      // Already awake: a poke on the nose makes him blink and glance over.
+      // (Five quick pokes within the window still toggles back to sleep.)
+      faceAlive.boop();
     }
   });
   /**
@@ -333,6 +393,8 @@ function wireSpotifyAuth(onAuthed: () => void): void {
       viz.setLiveAudio(liveAudio);
       faceAlive.setLiveAudio(liveAudio);
       refreshBalanceAvailability();
+      // If milkdrop is the active mode, it can now attach to the live graph.
+      void applyVisModeUI(viz.getMode());
       console.log("[viz] live audio: tap succeeded");
       return;
     }
@@ -340,6 +402,7 @@ function wireSpotifyAuth(onAuthed: () => void): void {
       viz.setLiveAudio(liveAudio);
       faceAlive.setLiveAudio(liveAudio);
       refreshBalanceAvailability();
+      void applyVisModeUI(viz.getMode());
       console.log(
         "[viz] live audio: loopback active (capturing system audio — captures ALL audio, not just Spotify)",
       );
@@ -828,6 +891,7 @@ function wireSpotifyAuth(onAuthed: () => void): void {
       else if (btn === "vis") {
         const next = viz.cycleMode();
         flashVisLabel(Visualizer.labelFor(next));
+        void applyVisModeUI(next);
       }
     },
   });
@@ -836,6 +900,7 @@ function wireSpotifyAuth(onAuthed: () => void): void {
 
   // Show current mode briefly on startup so user knows what they're seeing.
   flashVisLabel(Visualizer.labelFor(viz.getMode()));
+  void applyVisModeUI(viz.getMode());
 
   // Library browser populated only after auth.
   const drawerBody = document.getElementById("pl-drawer-body")!;
@@ -937,6 +1002,8 @@ function wireSpotifyAuth(onAuthed: () => void): void {
       }
       if (s.track.id !== lastTrackId) {
         lastTrackId = s.track.id;
+        // Curious reading glance toward the title ticker (no-op unless alive).
+        faceAlive.notifyTrackChange();
         // Single token guards every per-track async fetch (palette + analysis).
         // If the user skips tracks rapidly, late-arriving promises for old
         // tracks are dropped instead of overwriting the current track's data.
@@ -982,6 +1049,7 @@ function wireSpotifyAuth(onAuthed: () => void): void {
       }
     }
     viz.setPlaying(s.isPlaying);
+    faceAlive.setPlaying(s.isPlaying);
     viz.setPosition(s.positionMs);
     tickLyrics(s.positionMs);
     // Skip DOM write when the playing flag hasn't actually changed; the state
