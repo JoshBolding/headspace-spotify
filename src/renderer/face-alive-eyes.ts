@@ -1,53 +1,52 @@
 /**
  * AliveEyeRig — procedural canvas eyes for the alive-face easter egg.
  *
- * Each eye is a small <canvas> positioned over the head bitmap. Why canvas
- * instead of layered bitmaps (the previous three attempts):
+ * Each eye is a small <canvas> sitting (z-index 7) directly over the head
+ * bitmap (z-index 5). The canvas is TRANSPARENT everywhere except the eyeball
+ * itself — we never redraw the head's pixels. This is the whole trick:
  *
- *  - The base layer of every frame is head.png's OWN pixels for that region,
- *    drawn 1:1. The canvas edge is therefore literally invisible — there is
- *    no seam to hide, no clip-path edge, no feathering hack. We do NOT
- *    synthesize or "heal" skin: the head's painted brow, socket shadow, and
- *    cheek are kept exactly, so the eyeball sits in real anatomy.
- *  - The eyeball (sclera/iris/pupil/catchlight) is drawn procedurally inside
- *    an almond aperture that is TALLER than the painted closed-eye slit, so
- *    when open the eyeball fully covers the painted slit; when closed the
- *    aperture shrinks to nothing and the frame is pixel-identical to the
- *    sleeping head art. No cross-fade, no ghosting.
- *  - The upper lid rides the gaze (looking down lowers the lid), and the lid
- *    edge is drawn as the moving aperture boundary — not a sliding bitmap.
- *  - The catchlight moves at ~12% of the gaze vector — a fixed light source.
- *    A photographic eye slides its highlight with the iris, which is the
- *    single biggest "this is a sticker" tell.
- *  - The pupil dilates (wake constriction, beat hits, proximity) — something
- *    a photo iris can never do.
+ *  - The real #head bitmap supplies the brow, socket, cheek, and the painted
+ *    closed-eye slit. The canvas only paints the open eyeball inside an almond
+ *    aperture. So there is no rectangle of copied head pixels to mismatch the
+ *    real head — no seam, at any devicePixelRatio. (An earlier version drew a
+ *    copy of head.png as the base; at fractional DPR the copy resampled
+ *    differently than the head underneath and showed as a faint rectangle.)
+ *  - The aperture is sized to fully cover the painted closed-eye slit, so when
+ *    the eye is open the slit is hidden under the eyeball; when closed the
+ *    aperture shrinks to nothing and the canvas is fully transparent, so the
+ *    real head's painted sleeping eyes show through, pixel-perfect.
+ *  - Catchlight tracks the light source (~12% gaze parallax, not glued to the
+ *    iris). Pupil dilates. Upper lid rides the gaze. Iris foreshortens near
+ *    the socket edge to fake a rotating sphere.
  *
- * All colors are authored in the head's native lime palette; the canvas
- * element carries `filter: var(--theme-filter)` in CSS so themes recolor the
- * eyes exactly like the head bitmap they sit on.
+ * Colors are authored in the head's native lime palette; the canvas carries
+ * `filter: var(--theme-filter)` so themes recolor the eyes with the head.
  */
 
-// Geometry, in head-bitmap pixels (head.png is 234×394, displayed 1:1).
+// Canvas display size, in head-bitmap pixels (head.png is 234×394, shown 1:1).
 const CANVAS_W = 86;
 const CANVAS_H = 56;
+// Canvas top-left within #head-group (mirrors the CSS left/top of each eye).
 export const EYE_BOXES = {
   left: { x: 21, y: 246 },
   right: { x: 127, y: 246 },
 } as const;
 
 // Aperture: an almond between two quadratic curves, centered on the painted
-// eye. Corner slant follows the art (outer corners sit lower).
+// eye and sized to cover the painted slit.
 const APERTURE_CX = 43;
 const APERTURE_CY = 29;
-const APERTURE_RX = 25;
+const APERTURE_RX = 26;
 const TOP_APEX_OPEN = 12.5; // px above center at full open
 const BOT_APEX_OPEN = 8.0; // px below center at full open
-const CORNER_Y = 1.2; // corners sit slightly below the midline
+const CORNER_Y = 0.6; // corners sit a touch below the midline
 const CLOSED_LINE_Y = 4.0; // lid meeting line at closure ≈ painted crease
-const TILT_DEG = { left: -3.5, right: 3.5 } as const;
+// Slight UPWARD outer-corner tilt (canthal tilt) — alert, not droopy. The
+// outer corner of each eye is raised relative to the inner corner.
+const TILT_DEG = { left: 2.0, right: -2.0 } as const;
 
 // Lid–gaze coupling: the upper lid rides the eyeball. Looking down drops the
-// lid; looking up retracts it. This is the strongest "alive" cue in the rig.
+// lid; looking up retracts it. The strongest "alive" cue in the rig.
 const TOP_LID_GAZE_FOLLOW = 0.42;
 const BOT_LID_GAZE_FOLLOW = 0.14;
 
@@ -70,75 +69,49 @@ export interface EyeDrawState {
   glow: number;
 }
 
-interface EyeAssets {
-  closed: HTMLCanvasElement; // raw head.png region — the only base we need
-}
-
 export class AliveEyeRig {
-  private leftCanvas: HTMLCanvasElement;
-  private rightCanvas: HTMLCanvasElement;
   private leftCtx: CanvasRenderingContext2D;
   private rightCtx: CanvasRenderingContext2D;
-  private leftAssets: EyeAssets | null = null;
-  private rightAssets: EyeAssets | null = null;
+  private ready = false;
   private dpr: number;
 
   constructor(leftCanvas: HTMLCanvasElement, rightCanvas: HTMLCanvasElement) {
-    this.leftCanvas = leftCanvas;
-    this.rightCanvas = rightCanvas;
     this.dpr = Math.min(2, window.devicePixelRatio || 1);
     for (const c of [leftCanvas, rightCanvas]) {
-      c.width = CANVAS_W * this.dpr;
-      c.height = CANVAS_H * this.dpr;
+      c.width = Math.round(CANVAS_W * this.dpr);
+      c.height = Math.round(CANVAS_H * this.dpr);
     }
     this.leftCtx = leftCanvas.getContext("2d")!;
     this.rightCtx = rightCanvas.getContext("2d")!;
     this.leftCtx.scale(this.dpr, this.dpr);
     this.rightCtx.scale(this.dpr, this.dpr);
+    this.ready = true;
   }
 
-  async load(headSrc = "head.png"): Promise<void> {
-    const img = new Image();
-    img.src = headSrc;
-    await img.decode();
-    this.leftAssets = buildEyeAssets(img, EYE_BOXES.left.x, EYE_BOXES.left.y);
-    this.rightAssets = buildEyeAssets(img, EYE_BOXES.right.x, EYE_BOXES.right.y);
-    this.drawClosed();
+  // load() kept for API compatibility — the rig is fully procedural now and
+  // needs no bitmap, so this just resolves.
+  async load(): Promise<void> {
+    this.ready = true;
   }
 
   isReady(): boolean {
-    return this.leftAssets !== null;
+    return this.ready;
   }
 
-  /** Restore the painted sleeping face (used on deactivate and after load). */
+  /** Clear both canvases to transparent — the real head's painted eyes show. */
   drawClosed(): void {
-    if (this.leftAssets) {
-      this.leftCtx.clearRect(0, 0, CANVAS_W, CANVAS_H);
-      this.leftCtx.drawImage(this.leftAssets.closed, 0, 0, CANVAS_W, CANVAS_H);
-    }
-    if (this.rightAssets) {
-      this.rightCtx.clearRect(0, 0, CANVAS_W, CANVAS_H);
-      this.rightCtx.drawImage(this.rightAssets.closed, 0, 0, CANVAS_W, CANVAS_H);
-    }
+    this.leftCtx.clearRect(0, 0, CANVAS_W, CANVAS_H);
+    this.rightCtx.clearRect(0, 0, CANVAS_W, CANVAS_H);
   }
 
   draw(left: EyeDrawState, right: EyeDrawState): void {
-    if (this.leftAssets) this.drawEye(this.leftCtx, this.leftAssets, left, TILT_DEG.left);
-    if (this.rightAssets) this.drawEye(this.rightCtx, this.rightAssets, right, TILT_DEG.right);
+    this.drawEye(this.leftCtx, left, TILT_DEG.left);
+    this.drawEye(this.rightCtx, right, TILT_DEG.right);
   }
 
-  private drawEye(
-    g: CanvasRenderingContext2D,
-    assets: EyeAssets,
-    s: EyeDrawState,
-    tiltDeg: number,
-  ): void {
+  private drawEye(g: CanvasRenderingContext2D, s: EyeDrawState, tiltDeg: number): void {
     const open = clamp01(s.openness);
     g.clearRect(0, 0, CANVAS_W, CANVAS_H);
-
-    // Base: the head's own painted pixels, untouched. The painted closed-eye
-    // slit is covered by the eyeball when open and revealed when closed.
-    g.drawImage(assets.closed, 0, 0, CANVAS_W, CANVAS_H);
 
     // Aperture curves. Top lid follows blink + gaze + widen; bottom lid moves
     // at a fraction of the travel (real lower lids barely move).
@@ -152,7 +125,7 @@ export class AliveEyeRig {
       s.pupilY * BOT_LID_GAZE_FOLLOW * open +
       s.widen * 1.6;
 
-    if (topApexY >= botApexY - 0.4) return; // lids met — painted face only
+    if (topApexY >= botApexY - 0.4) return; // lids met — transparent, real face
 
     const tilt = (tiltDeg * Math.PI) / 180;
     const pt = (x: number, y: number): [number, number] => [
@@ -175,22 +148,23 @@ export class AliveEyeRig {
     this.drawEyeball(g, s, topApexY);
     g.restore();
 
-    // Lid edges over the aperture boundary. The lash line IS the moving lid.
+    // Lid edges over the aperture boundary. The lash line IS the moving lid,
+    // and these strokes feather the hard clip edge into the painted face.
     const edgeAlpha = clamp01(open / 0.12);
     if (edgeAlpha > 0.01) {
       g.save();
       g.globalAlpha = edgeAlpha;
       // Upper lash: heavy and dark, blending into the painted crease.
-      g.strokeStyle = "rgba(8, 14, 2, 0.9)";
-      g.lineWidth = 2.2;
+      g.strokeStyle = "rgba(8, 14, 2, 0.92)";
+      g.lineWidth = 2.4;
       g.lineCap = "round";
       const upper = new Path2D();
       upper.moveTo(ax, ay);
       upper.quadraticCurveTo(tcx, tcy, bx, by);
       g.stroke(upper);
       // Lower lid: thin and subtle.
-      g.strokeStyle = "rgba(12, 22, 4, 0.4)";
-      g.lineWidth = 1.0;
+      g.strokeStyle = "rgba(12, 22, 4, 0.45)";
+      g.lineWidth = 1.1;
       const lower = new Path2D();
       lower.moveTo(ax, ay);
       lower.quadraticCurveTo(bcx, bcy, bx, by);
@@ -203,33 +177,26 @@ export class AliveEyeRig {
     const cx = APERTURE_CX;
     const cy = APERTURE_CY;
 
-    // Sclera: dark olive — these are dim alien eyes, not bright human whites.
-    // A soft vertical gradient (lighter low, shadowed under the upper lid).
+    // Sclera: dark olive — dim alien eyes, not bright human whites. Soft
+    // vertical gradient (shadowed under the upper lid, lighter low).
     const sclera = g.createLinearGradient(0, cy - TOP_APEX_OPEN, 0, cy + BOT_APEX_OPEN);
-    sclera.addColorStop(0, "hsl(84, 30%, 34%)");
-    sclera.addColorStop(0.55, "hsl(82, 32%, 50%)");
-    sclera.addColorStop(1, "hsl(80, 30%, 40%)");
+    sclera.addColorStop(0, "hsl(84, 30%, 32%)");
+    sclera.addColorStop(0.55, "hsl(82, 32%, 48%)");
+    sclera.addColorStop(1, "hsl(80, 30%, 38%)");
     g.fillStyle = sclera;
     g.fillRect(cx - APERTURE_RX - 2, cy - TOP_APEX_OPEN - 8, APERTURE_RX * 2 + 4, 44);
 
-    // Corner ambient occlusion: the eyeball recedes into the socket.
-    for (const side of [-1, 1]) {
-      const ao = g.createRadialGradient(
-        cx + side * APERTURE_RX,
-        cy + CORNER_Y,
-        1,
-        cx + side * APERTURE_RX,
-        cy + CORNER_Y,
-        16,
-      );
-      ao.addColorStop(0, "rgba(10, 18, 3, 0.7)");
-      ao.addColorStop(1, "rgba(10, 18, 3, 0)");
-      g.fillStyle = ao;
-      g.fillRect(cx - APERTURE_RX - 2, cy - 22, APERTURE_RX * 2 + 4, 46);
-    }
+    // Rim shadow just inside the whole aperture so the eyeball seats into the
+    // lid instead of ending at a hard cut — softens the clip edge into skin.
+    const rim = g.createRadialGradient(cx, cy, IRIS_R + 1, cx, cy, APERTURE_RX + 2);
+    rim.addColorStop(0, "rgba(12, 20, 4, 0)");
+    rim.addColorStop(0.78, "rgba(12, 20, 4, 0)");
+    rim.addColorStop(1, "rgba(12, 20, 4, 0.55)");
+    g.fillStyle = rim;
+    g.fillRect(cx - APERTURE_RX - 2, cy - TOP_APEX_OPEN - 8, APERTURE_RX * 2 + 4, 44);
 
-    // Iris + pupil. Slight elliptical foreshortening as the iris approaches
-    // the socket edge fakes a sphere rotating instead of a disc sliding.
+    // Iris + pupil. Slight elliptical foreshortening near the socket edge
+    // fakes a sphere rotating instead of a disc sliding.
     const ix = cx + s.pupilX;
     const iy = cy + s.pupilY;
     const squashX = 1 - 0.22 * Math.min(1, Math.abs(s.pupilX) / 20.5);
@@ -284,11 +251,11 @@ export class AliveEyeRig {
     g.arc(cx + 2.4 + s.pupilX * CATCHLIGHT_PARALLAX, cy + 2.8 + s.pupilY * CATCHLIGHT_PARALLAX, 0.85, 0, Math.PI * 2);
     g.fill();
 
-    // Upper-lid shadow cast onto the eyeball — sells that the ball sits
-    // recessed under the lid. Anchored to the moving top curve.
+    // Upper-lid shadow cast onto the eyeball — the ball sits recessed under
+    // the lid. Anchored to the moving top curve.
     const shadowTop = cy + topApexY - 1;
     const lidShadow = g.createLinearGradient(0, shadowTop, 0, shadowTop + 8);
-    lidShadow.addColorStop(0, "rgba(6, 12, 2, 0.62)");
+    lidShadow.addColorStop(0, "rgba(6, 12, 2, 0.66)");
     lidShadow.addColorStop(1, "rgba(6, 12, 2, 0)");
     g.fillStyle = lidShadow;
     g.fillRect(cx - APERTURE_RX - 2, shadowTop, APERTURE_RX * 2 + 4, 9);
@@ -306,17 +273,6 @@ export class AliveEyeRig {
       g.restore();
     }
   }
-}
-
-/** Cut the eye region out of head.png. No synthesis — the painted face is
- *  the base, and the eyeball overdraws the closed slit when the lids open. */
-function buildEyeAssets(headImg: HTMLImageElement, sx: number, sy: number): EyeAssets {
-  const closed = document.createElement("canvas");
-  closed.width = CANVAS_W;
-  closed.height = CANVAS_H;
-  const cg = closed.getContext("2d")!;
-  cg.drawImage(headImg, sx, sy, CANVAS_W, CANVAS_H, 0, 0, CANVAS_W, CANVAS_H);
-  return { closed };
 }
 
 function clamp01(v: number): number {
