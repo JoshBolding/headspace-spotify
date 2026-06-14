@@ -49,7 +49,16 @@ test.setTimeout(120_000);
 test("face alive eyes blink, track, saccade, and idle organically", async () => {
   await mkdir(ARTIFACT_DIR, { recursive: true });
   const app = await electron.launch({
-    args: [REPO_ROOT],
+    // Disable Chromium's background/occluded-window throttling so the eye
+    // animation runs at full rAF rate regardless of whether the test window
+    // has focus. Without this, an occluded test window drops to ~1fps and the
+    // 60ms blinks fall between samples, flaking the blink-count assertions.
+    args: [
+      REPO_ROOT,
+      "--disable-background-timer-throttling",
+      "--disable-renderer-backgrounding",
+      "--disable-backgrounding-occluded-windows",
+    ],
     env: {
       ...process.env,
       HEADSPACE_FACE_TEST: "1",
