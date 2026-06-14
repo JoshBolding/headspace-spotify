@@ -571,6 +571,28 @@
       #audio-hud .ah-rms-val.ah-silent {
         color: #ffb14e;
       }
+      #audio-hud .ah-bar {
+        position: relative;
+      }
+      #audio-hud .ah-surge-fill.over {
+        background: linear-gradient(to right, #6dff8a, #b6ffb0);
+      }
+      /* Threshold marker (bar midpoint) and peak-hold marker. */
+      #audio-hud .ah-surge-thresh {
+        position: absolute;
+        top: -1px;
+        bottom: -1px;
+        width: 1px;
+        background: rgba(255, 255, 255, 0.75);
+      }
+      #audio-hud .ah-surge-peak {
+        position: absolute;
+        top: -1px;
+        bottom: -1px;
+        width: 2px;
+        margin-left: -1px;
+        background: #ffd24e;
+      }
 
       /* Transparent right-click target over the face screen. */
       #vis-hit {

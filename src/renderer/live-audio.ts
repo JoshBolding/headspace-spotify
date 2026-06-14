@@ -20,6 +20,12 @@
 
 export type LiveAudioSource = "tap" | "loopback";
 
+// Drop-detector tuning. A drop fires when the live loudness envelope surges
+// this far above its slow baseline while genuinely loud. Surfaced on the HUD
+// (SURGE meter) so these can be dialed against real tracks.
+const DROP_SURGE_THRESHOLD = 0.1;
+const DROP_ENERGY_MIN = 0.16;
+
 export class LiveAudio {
   private ctx: AudioContext | null = null;
   private analyser: AnalyserNode | null = null;
@@ -45,10 +51,13 @@ export class LiveAudio {
   private frameOnset = false;
   private frameDrop = false;
 
-  // Drop detector state: rolling broadband energy so we can recognize
-  // "loud onset right after a quiet stretch".
+  // Drop detector state. A drop is a sharp jump of the live loudness envelope
+  // (energyEnv) above a slow-moving baseline (energySlow). The gap between
+  // them is the "surge"; a rising-edge surge past a threshold = a drop.
   private energyEnv = 0;
-  private energyHistory: Array<{ t: number; e: number }> = [];
+  private energySlow = 0;
+  private prevSurge = 0;
+  private lastSurge = 0;
   private lastDropAt = 0;
 
   getSource(): LiveAudioSource | null {
@@ -73,7 +82,9 @@ export class LiveAudio {
     this.frameOnset = false;
     this.frameDrop = false;
     this.energyEnv = 0;
-    this.energyHistory = [];
+    this.energySlow = 0;
+    this.prevSurge = 0;
+    this.lastSurge = 0;
     this.lastDropAt = 0;
   }
 
@@ -274,11 +285,10 @@ export class LiveAudio {
     let sum = 0;
     for (let i = 0; i < usable; i++) sum += this.freq[i];
     const energy = sum / usable / 255;
-    this.energyEnv += (energy - this.energyEnv) * (energy > this.energyEnv ? 0.4 : 0.08);
-    this.energyHistory.push({ t: now, e: this.energyEnv });
-    while (this.energyHistory.length && now - this.energyHistory[0].t > 3000) {
-      this.energyHistory.shift();
-    }
+    // Fast envelope (snappy attack) and a slow baseline. The gap is the surge.
+    this.energyEnv += (energy - this.energyEnv) * (energy > this.energyEnv ? 0.45 : 0.08);
+    this.energySlow += (energy - this.energySlow) * 0.02;
+    this.lastSurge = Math.max(0, this.energyEnv - this.energySlow);
 
     if (this.fluxHistory.length < 12) return;
     let avg = 0;
@@ -308,25 +318,25 @@ export class LiveAudio {
       this.frameOnset = true;
     }
 
-    // Drop: a hard hit landing right after a recent quiet dip — the breakdown
-    // before the slam. Look at the MINIMUM energy 150–900ms ago (the dip),
-    // NOT the build-up further back. If it dipped well below the now-high
-    // level and a strong beat just landed, it's a drop. 5s refractory.
-    if (this.frameBeat && flux > avg * 1.9 && now - this.lastDropAt > 5000) {
-      let priorMin = Infinity;
-      for (const h of this.energyHistory) {
-        const age = now - h.t;
-        if (age > 150 && age < 900) priorMin = Math.min(priorMin, h.e);
-      }
-      if (
-        this.energyEnv > 0.16 &&
-        priorMin < Infinity &&
-        priorMin < this.energyEnv * 0.6
-      ) {
-        this.lastDropAt = now;
-        this.frameDrop = true;
-      }
+    // Drop: the live envelope surges past its slow baseline (a breakdown→slam
+    // jump), detected on the rising edge so it fires once. Energy must be
+    // genuinely loud now, and the surge must clear the threshold. 4s refractory.
+    const surge = this.lastSurge;
+    if (
+      now - this.lastDropAt > 4000 &&
+      this.energyEnv > DROP_ENERGY_MIN &&
+      surge > DROP_SURGE_THRESHOLD &&
+      this.prevSurge <= DROP_SURGE_THRESHOLD
+    ) {
+      this.lastDropAt = now;
+      this.frameDrop = true;
     }
+    this.prevSurge = surge;
+  }
+
+  /** Live drop-detector metrics for the diagnostic HUD. */
+  getDropMetrics(): { surge: number; threshold: number; energy: number } {
+    return { surge: this.lastSurge, threshold: DROP_SURGE_THRESHOLD, energy: this.energyEnv };
   }
 
   /**

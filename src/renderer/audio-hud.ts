@@ -37,12 +37,16 @@ export class AudioHud {
   private onsetDot: HTMLElement;
   private dropDot: HTMLElement;
   private rmsEl: HTMLElement;
+  private surgeFill!: HTMLElement;
+  private surgePeak!: HTMLElement;
+  private surgeThresh!: HTMLElement;
   private liveAudio: LiveAudio | null = null;
   private rafHandle: number | null = null;
   private visible = false;
   private beatFlash = 0;
   private onsetFlash = 0;
   private dropFlash = 0;
+  private surgePeakFrac = 0;
 
   constructor(parent: HTMLElement) {
     this.root = document.createElement("div");
@@ -54,6 +58,14 @@ export class AudioHud {
         <span class="ah-src">—</span>
       </div>
       <div class="ah-meters"></div>
+      <div class="ah-meter ah-surge-meter">
+        <span class="ah-meter-label">SRG</span>
+        <span class="ah-bar">
+          <span class="ah-bar-fill ah-surge-fill"></span>
+          <span class="ah-surge-peak"></span>
+          <span class="ah-surge-thresh"></span>
+        </span>
+      </div>
       <div class="ah-row ah-flags">
         <span class="ah-dot ah-beat">BEAT</span>
         <span class="ah-dot ah-onset">ONSET</span>
@@ -67,6 +79,9 @@ export class AudioHud {
     this.onsetDot = this.root.querySelector(".ah-onset")!;
     this.dropDot = this.root.querySelector(".ah-drop")!;
     this.rmsEl = this.root.querySelector(".ah-rms-val")!;
+    this.surgeFill = this.root.querySelector(".ah-surge-fill")!;
+    this.surgePeak = this.root.querySelector(".ah-surge-peak")!;
+    this.surgeThresh = this.root.querySelector(".ah-surge-thresh")!;
 
     const meters = this.root.querySelector(".ah-meters")!;
     for (const band of BANDS) {
@@ -140,6 +155,16 @@ export class AudioHud {
       if (this.liveAudio.checkBeat()) this.beatFlash = 1;
       if (this.liveAudio.checkOnset()) this.onsetFlash = 1;
       if (this.liveAudio.checkDrop()) this.dropFlash = 1;
+
+      // Surge meter: threshold sits at the bar's midpoint so overshoot past it
+      // (= a drop) is visible. Peak-hold shows how high the last surge reached.
+      const m = this.liveAudio.getDropMetrics();
+      const frac = m.threshold > 0 ? Math.min(1, m.surge / (m.threshold * 2)) : 0;
+      this.surgeThresh.style.left = "50%";
+      this.surgeFill.style.width = `${Math.round(frac * 100)}%`;
+      this.surgeFill.classList.toggle("over", m.surge >= m.threshold);
+      this.surgePeakFrac = Math.max(frac, this.surgePeakFrac - 0.01);
+      this.surgePeak.style.left = `${Math.round(this.surgePeakFrac * 100)}%`;
     }
     this.beatDot.classList.toggle("lit", this.beatFlash > 0.5);
     this.onsetDot.classList.toggle("lit", this.onsetFlash > 0.5);
