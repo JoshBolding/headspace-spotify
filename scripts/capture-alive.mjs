@@ -62,6 +62,19 @@ try {
   await page.keyboard.press("Control+Shift+A");
   await page.waitForTimeout(200);
   await shot("alive-audio-hud.png", { x: 0, y: 0, width: 160, height: 130 });
+  await page.keyboard.press("Control+Shift+A"); // hide HUD again
+
+  // Dismiss any status overlay (the Widevine dialog appears with no Spotify
+  // auth and would intercept the click), then right-click the screen.
+  await page.evaluate(() => {
+    document.getElementById("status-overlay")?.classList.remove("show");
+    document.getElementById("auth-overlay")?.setAttribute("data-show", "0");
+  });
+  await page.waitForTimeout(100);
+  await page.mouse.click(360, 120, { button: "right" });
+  await page.waitForTimeout(200);
+  await shot("alive-vis-menu.png", { x: 0, y: 0, width: 549, height: 394 });
+  await page.mouse.click(40, 360); // dismiss
 
   // Report the speaker canvas screen rects so the clip can be aimed precisely.
   const rects = await page.evaluate(() => {

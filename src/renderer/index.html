@@ -574,6 +574,74 @@
         color: #ffb14e;
       }
 
+      /* Transparent right-click target over the face screen. */
+      #vis-hit {
+        position: absolute;
+        left: calc(var(--head-x) + 2px);
+        top: 50px;
+        width: 230px;
+        height: 175px;
+        z-index: 8;
+        background: transparent;
+      }
+      /* Right-click visualizer menu. */
+      #vis-context-menu {
+        position: absolute;
+        z-index: 60;
+        min-width: 150px;
+        padding: 4px;
+        background: rgba(5, 14, 2, 0.96);
+        border: 1px solid hsla(var(--theme-hue), 70%, 55%, 0.55);
+        border-radius: 6px;
+        box-shadow: 0 6px 18px rgba(0, 0, 0, 0.55);
+        font-family: inherit;
+        font-size: 10px;
+        color: hsl(var(--theme-hue), 80%, 84%);
+        display: none;
+        user-select: none;
+      }
+      #vis-context-menu.show {
+        display: block;
+      }
+      #vis-context-menu .vm-head {
+        font-size: 8px;
+        font-weight: 700;
+        letter-spacing: 0.06em;
+        opacity: 0.6;
+        padding: 3px 7px 4px;
+        text-transform: uppercase;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        max-width: 190px;
+      }
+      #vis-context-menu .vm-sep {
+        height: 1px;
+        margin: 3px 4px;
+        background: hsla(var(--theme-hue), 60%, 55%, 0.22);
+      }
+      #vis-context-menu .vm-item {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        padding: 5px 7px;
+        border-radius: 4px;
+        cursor: pointer;
+        white-space: nowrap;
+      }
+      #vis-context-menu .vm-item:hover {
+        background: hsla(var(--theme-hue), 75%, 50%, 0.28);
+      }
+      #vis-context-menu .vm-item .vm-val {
+        opacity: 0.7;
+        font-size: 9px;
+      }
+      #vis-context-menu .vm-item.vm-on .vm-val {
+        color: #6dff8a;
+        opacity: 1;
+      }
+
       /* === Library browser (right drawer) ============================== */
       .lb-root {
         display: flex;
@@ -1823,6 +1891,11 @@
            masked to the screen interior like #vis-canvas. -->
       <canvas id="butterchurn-canvas"></canvas>
       <div id="milkdrop-hint">♪ play audio for Milkdrop</div>
+      <!-- Transparent hit layer over the screen so right-clicks register there
+           (the screen cutout is otherwise click-through). Hosts the visualizer
+           context menu. -->
+      <div id="vis-hit" data-opaque="1" aria-hidden="true"></div>
+      <div id="vis-context-menu" data-opaque="1" aria-hidden="true"></div>
       <div id="vis-mode-label"></div>
       <div id="lyrics-overlay">
         <div class="ly-prev" id="ly-prev"></div>

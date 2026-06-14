@@ -326,17 +326,28 @@ function wireSpotifyAuth(onAuthed: () => void): void {
     return bcViz.init(graph.ctx, graph.node);
   }
 
+  // Milkdrop preset controls (driven from the right-click menu on the screen).
+  // Locked = stay on the current preset (no auto-cycle, no drop switches).
+  const MILKDROP_CYCLE_OPTIONS = [10_000, 30_000, 60_000, 0]; // 0 = off
+  let milkdropLocked = localStorage.getItem("headspace.milkdrop.locked") === "1";
+  let milkdropCycleMs = Number(
+    localStorage.getItem("headspace.milkdrop.cycle") ?? "30000",
+  );
+  if (!MILKDROP_CYCLE_OPTIONS.includes(milkdropCycleMs)) milkdropCycleMs = 30_000;
+
   /** React loop while milkdrop is active: preset switches on drops + a timer. */
   function startMilkdropDrivers(): void {
     stopMilkdropDrivers();
     const poll = () => {
-      if (bcViz.isReady() && liveAudio.checkDrop()) bcViz.onDrop();
+      if (bcViz.isReady() && !milkdropLocked && liveAudio.checkDrop()) bcViz.onDrop();
       bcDropRaf = requestAnimationFrame(poll);
     };
     bcDropRaf = requestAnimationFrame(poll);
-    bcPresetTimer = window.setInterval(() => {
-      if (bcViz.isReady()) bcViz.nextPreset();
-    }, 28_000);
+    if (!milkdropLocked && milkdropCycleMs > 0) {
+      bcPresetTimer = window.setInterval(() => {
+        if (bcViz.isReady() && !milkdropLocked) bcViz.nextPreset();
+      }, milkdropCycleMs);
+    }
   }
 
   function stopMilkdropDrivers(): void {
@@ -344,6 +355,25 @@ function wireSpotifyAuth(onAuthed: () => void): void {
     bcDropRaf = null;
     if (bcPresetTimer !== null) window.clearInterval(bcPresetTimer);
     bcPresetTimer = null;
+  }
+
+  /** Re-arm the cycle timer after a lock/speed change, if milkdrop is live. */
+  function refreshMilkdropDrivers(): void {
+    if (document.body.classList.contains("vis-milkdrop") && bcViz.isReady()) {
+      startMilkdropDrivers();
+    }
+  }
+
+  function setMilkdropLocked(locked: boolean): void {
+    milkdropLocked = locked;
+    localStorage.setItem("headspace.milkdrop.locked", locked ? "1" : "0");
+    refreshMilkdropDrivers();
+  }
+
+  function setMilkdropCycle(ms: number): void {
+    milkdropCycleMs = ms;
+    localStorage.setItem("headspace.milkdrop.cycle", String(ms));
+    refreshMilkdropDrivers();
   }
 
   /** Show/hide milkdrop UI + manage the WebGL render loop for a given mode. */
@@ -673,6 +703,124 @@ function wireSpotifyAuth(onAuthed: () => void): void {
     void el.offsetWidth;
     el.classList.add("show");
   }
+
+  // ---------- Right-click visualizer / Milkdrop menu ----------
+  const visHit = document.getElementById("vis-hit")!;
+  const visMenu = document.getElementById("vis-context-menu")!;
+  let visMenuOpen = false;
+
+  function hideVisMenu() {
+    visMenuOpen = false;
+    visMenu.classList.remove("show");
+  }
+
+  function switchVisMode(mode: VisMode) {
+    viz.setMode(mode);
+    flashVisLabel(Visualizer.labelFor(mode));
+    void applyVisModeUI(mode);
+  }
+
+  function cycleLabel(ms: number): string {
+    return ms === 0 ? "Off" : `${Math.round(ms / 1000)}s`;
+  }
+
+  function renderVisMenu(x: number, y: number) {
+    const mode = viz.getMode();
+    visMenu.innerHTML = "";
+    const addHead = (t: string) => {
+      const d = document.createElement("div");
+      d.className = "vm-head";
+      d.textContent = t;
+      visMenu.appendChild(d);
+    };
+    const addSep = () => {
+      const d = document.createElement("div");
+      d.className = "vm-sep";
+      visMenu.appendChild(d);
+    };
+    const addItem = (
+      label: string,
+      opts: { val?: string; on?: boolean; keepOpen?: boolean; action: () => void } = { action: () => {} },
+    ) => {
+      const d = document.createElement("div");
+      d.className = "vm-item" + (opts.on ? " vm-on" : "");
+      const l = document.createElement("span");
+      l.textContent = label;
+      d.appendChild(l);
+      if (opts.val !== undefined) {
+        const v = document.createElement("span");
+        v.className = "vm-val";
+        v.textContent = opts.val;
+        d.appendChild(v);
+      }
+      d.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        opts.action();
+        if (opts.keepOpen) renderVisMenu(x, y);
+        else hideVisMenu();
+      });
+      visMenu.appendChild(d);
+    };
+
+    addHead(`Visualizer · ${Visualizer.labelFor(mode)}`);
+    if (mode === "milkdrop") {
+      if (bcViz.isReady()) {
+        addHead(bcViz.currentPresetName());
+        addItem("Next preset", { keepOpen: true, action: () => bcViz.nextPreset() });
+        addItem("Previous preset", { keepOpen: true, action: () => bcViz.prevPreset() });
+        addItem("Random preset", { keepOpen: true, action: () => bcViz.randomPreset() });
+        addItem("Lock preset", {
+          val: milkdropLocked ? "ON" : "off",
+          on: milkdropLocked,
+          keepOpen: true,
+          action: () => setMilkdropLocked(!milkdropLocked),
+        });
+        addItem("Auto-cycle", {
+          val: cycleLabel(milkdropCycleMs),
+          keepOpen: true,
+          action: () => {
+            const i = MILKDROP_CYCLE_OPTIONS.indexOf(milkdropCycleMs);
+            setMilkdropCycle(MILKDROP_CYCLE_OPTIONS[(i + 1) % MILKDROP_CYCLE_OPTIONS.length]);
+          },
+        });
+      } else {
+        addHead("no live audio — play a track");
+      }
+      addSep();
+      addItem("Next visualizer mode", {
+        action: () => {
+          const m = viz.cycleMode();
+          flashVisLabel(Visualizer.labelFor(m));
+          void applyVisModeUI(m);
+        },
+      });
+    } else {
+      addItem("Switch to Milkdrop", { action: () => switchVisMode("milkdrop") });
+      addItem("Next visualizer mode", {
+        action: () => {
+          const m = viz.cycleMode();
+          flashVisLabel(Visualizer.labelFor(m));
+          void applyVisModeUI(m);
+        },
+      });
+    }
+
+    // Show, then clamp within the window now that the size is known.
+    visMenu.classList.add("show");
+    visMenuOpen = true;
+    const w = visMenu.offsetWidth;
+    const h = visMenu.offsetHeight;
+    visMenu.style.left = `${Math.max(4, Math.min(x, window.innerWidth - w - 4))}px`;
+    visMenu.style.top = `${Math.max(4, Math.min(y, window.innerHeight - h - 4))}px`;
+  }
+
+  visHit.addEventListener("contextmenu", (e) => {
+    e.preventDefault();
+    renderVisMenu(e.clientX, e.clientY);
+  });
+  document.addEventListener("pointerdown", (e) => {
+    if (visMenuOpen && !visMenu.contains(e.target as Node)) hideVisMenu();
+  });
 
   // Long-form status overlay (full message visible, doesn't truncate).
   const statusOverlay = document.getElementById("status-overlay")!;

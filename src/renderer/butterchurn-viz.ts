@@ -125,11 +125,40 @@ export class ButterchurnViz {
     }
   }
 
+  /** Load the preset at the current index with a crossfade. */
+  private applyPreset(blendTime: number): void {
+    if (!this.visualizer || this.presetKeys.length === 0) return;
+    this.visualizer.loadPreset(this.presets[this.presetKeys[this.presetIndex]], blendTime);
+    this.lastPresetSwitchAt = performance.now();
+  }
+
   /** Advance to the next preset with a crossfade. */
   nextPreset(blendTime = 2.7): void {
-    if (!this.visualizer || this.presetKeys.length === 0) return;
+    if (this.presetKeys.length === 0) return;
     this.presetIndex = (this.presetIndex + 1) % this.presetKeys.length;
-    this.visualizer.loadPreset(this.presets[this.presetKeys[this.presetIndex]], blendTime);
+    this.applyPreset(blendTime);
+  }
+
+  /** Go to the previous preset. */
+  prevPreset(blendTime = 2.7): void {
+    if (this.presetKeys.length === 0) return;
+    this.presetIndex = (this.presetIndex - 1 + this.presetKeys.length) % this.presetKeys.length;
+    this.applyPreset(blendTime);
+  }
+
+  /** Jump to a random preset. */
+  randomPreset(blendTime = 2.0): void {
+    if (this.presetKeys.length === 0) return;
+    this.presetIndex = Math.floor(Math.random() * this.presetKeys.length);
+    this.applyPreset(blendTime);
+  }
+
+  /** Short, human-readable name of the current preset for menus/labels. */
+  currentPresetName(): string {
+    const key = this.presetKeys[this.presetIndex] ?? "";
+    // Preset keys are often "Author - Title"; show the title-ish tail, trimmed.
+    const tail = key.includes(" - ") ? key.slice(key.indexOf(" - ") + 3) : key;
+    return tail.length > 28 ? `${tail.slice(0, 27)}…` : tail || "—";
   }
 
   /**
@@ -138,12 +167,8 @@ export class ButterchurnViz {
    */
   onDrop(): void {
     if (!this.visualizer) return;
-    const now = performance.now();
-    if (now - this.lastPresetSwitchAt < 6000) return;
-    this.lastPresetSwitchAt = now;
-    const next = Math.floor(Math.random() * this.presetKeys.length);
-    this.presetIndex = next;
-    this.visualizer.loadPreset(this.presets[this.presetKeys[next]], 1.5);
+    if (performance.now() - this.lastPresetSwitchAt < 6000) return;
+    this.randomPreset(1.5);
   }
 
   resize(): void {
