@@ -57,6 +57,12 @@ try {
   await shot("alive-speakers-driven.png", leftEarClip);
   await shot("alive-full-driven.png", { x: 0, y: 0, width: 549, height: 394 });
 
+  // Toggle the audio HUD and capture its layout (no real audio in this run,
+  // so it will read SYNTHETIC/NONE with flat bars — we're checking the layout).
+  await page.keyboard.press("Control+Shift+A");
+  await page.waitForTimeout(200);
+  await shot("alive-audio-hud.png", { x: 0, y: 0, width: 160, height: 130 });
+
   // Report the speaker canvas screen rects so the clip can be aimed precisely.
   const rects = await page.evaluate(() => {
     const grab = (sel) =>

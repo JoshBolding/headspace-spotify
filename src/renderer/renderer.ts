@@ -8,6 +8,7 @@
 
 import { Visualizer, VIS_MODES, buildSyntheticAnalysis, type VisMode } from "./visualizer";
 import { ButterchurnViz } from "./butterchurn-viz";
+import { AudioHud } from "./audio-hud";
 import { SkinState } from "./skin-state";
 import { Transport } from "./transport";
 import { SkinSlider } from "./skin-slider";
@@ -302,6 +303,19 @@ function wireSpotifyAuth(onAuthed: () => void): void {
   const bcViz = new ButterchurnViz(bcCanvas);
   let bcDropRaf: number | null = null;
   let bcPresetTimer: number | null = null;
+
+  // Live audio diagnostic HUD (Ctrl+Shift+A). Shows whether capture is real
+  // and reacting — the fastest way to tell "no signal" from "weak signal".
+  // It observes the persistent LiveAudio instance directly, so it reflects
+  // whatever source attaches (or none) without needing to be re-pointed.
+  const audioHud = new AudioHud(document.getElementById("stage") ?? document.body);
+  audioHud.setLiveAudio(liveAudio);
+  document.addEventListener("keydown", (e) => {
+    if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === "a") {
+      e.preventDefault();
+      audioHud.toggle();
+    }
+  });
 
   /** Attach butterchurn to the live audio graph if we have one and haven't yet. */
   async function ensureButterchurn(): Promise<boolean> {

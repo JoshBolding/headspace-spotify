@@ -479,6 +479,101 @@
         display: block;
       }
 
+      /* Audio diagnostic HUD (Ctrl+Shift+A) — live capture source + band
+         levels + beat/onset/drop indicators. */
+      #audio-hud {
+        position: absolute;
+        left: 6px;
+        top: 6px;
+        z-index: 50;
+        width: 132px;
+        padding: 6px 7px;
+        background: rgba(4, 12, 2, 0.86);
+        border: 1px solid hsla(var(--theme-hue), 70%, 55%, 0.5);
+        border-radius: 5px;
+        font-family: inherit;
+        font-size: 8px;
+        letter-spacing: 0.04em;
+        color: hsl(var(--theme-hue), 80%, 82%);
+        pointer-events: none;
+        display: none;
+        user-select: none;
+      }
+      #audio-hud.show {
+        display: block;
+      }
+      #audio-hud .ah-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 4px;
+      }
+      #audio-hud .ah-title {
+        font-weight: 700;
+        opacity: 0.7;
+      }
+      #audio-hud .ah-src-live {
+        color: #6dff8a;
+        font-weight: 700;
+      }
+      #audio-hud .ah-src-none {
+        color: #ffb14e;
+        font-weight: 700;
+      }
+      #audio-hud .ah-meter {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        margin-bottom: 3px;
+      }
+      #audio-hud .ah-meter-label {
+        width: 20px;
+        opacity: 0.75;
+      }
+      #audio-hud .ah-bar {
+        flex: 1;
+        height: 7px;
+        background: rgba(255, 255, 255, 0.08);
+        border-radius: 2px;
+        overflow: hidden;
+      }
+      #audio-hud .ah-bar-fill {
+        display: block;
+        height: 100%;
+        width: 0%;
+        background: linear-gradient(to right, hsl(var(--theme-hue), 80%, 45%), hsl(var(--theme-hue), 90%, 65%));
+        transition: width 60ms linear;
+      }
+      #audio-hud .ah-flags {
+        gap: 4px;
+        justify-content: flex-start;
+      }
+      #audio-hud .ah-dot {
+        flex: 1;
+        text-align: center;
+        padding: 2px 0;
+        border-radius: 2px;
+        background: rgba(255, 255, 255, 0.06);
+        opacity: 0.4;
+        font-size: 7px;
+        font-weight: 700;
+      }
+      #audio-hud .ah-dot.lit {
+        opacity: 1;
+        background: hsla(var(--theme-hue), 90%, 55%, 0.85);
+        color: #04140a;
+      }
+      #audio-hud .ah-rms {
+        margin-bottom: 0;
+        justify-content: center;
+      }
+      #audio-hud .ah-rms-val {
+        opacity: 0.85;
+      }
+      #audio-hud .ah-rms-val.ah-silent {
+        color: #ffb14e;
+      }
+
       /* === Library browser (right drawer) ============================== */
       .lb-root {
         display: flex;
