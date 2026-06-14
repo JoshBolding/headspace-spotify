@@ -47,6 +47,8 @@ export interface FaceAliveDebugApi {
   /** Test-only: drive the speaker cones with synthetic band energy so their
    *  excursion can be verified without a live audio source. */
   pumpCones: (bass: number, mid: number, high: number, beat: boolean) => void;
+  /** Test-only: fire the drop reaction so it can be verified without audio. */
+  triggerDrop: () => void;
 }
 
 interface EyeTargets {
@@ -134,7 +136,7 @@ const VERGENCE_NEAR_PX = 230;
 const WAKE_CONSTRICT_SCALE = 0.76;
 const WAKE_PUPIL_SETTLE_MS = 1700;
 const BEAT_PUPIL_BUMP = 0.1;
-const DROP_CONSTRICT_SCALE = 0.72;
+const DROP_CONSTRICT_SCALE = 0.58;
 
 // Sleep cycle. Only engages if music had actually been playing this session.
 const DROWSE_AFTER_PAUSE_MS = 30_000;
@@ -216,6 +218,7 @@ export class FaceAlive {
   // Behaviors.
   private script: GazeScript | null = null;
   private widen = 0;
+  private dropGlow = 0;
   private pupilScale = 1;
   private pupilBump = 0;
   private squintUntil = 0;
@@ -340,6 +343,13 @@ export class FaceAlive {
         this.coneHigh = high;
         this.speakers.update(16, { bass, mid, high }, beat, beat);
         this.coneTestHoldUntil = performance.now() + 500;
+      },
+      triggerDrop: () => {
+        if (!this.active) return;
+        this.widen = 1;
+        this.pupilBump = -(1 - DROP_CONSTRICT_SCALE);
+        this.headJerkVel -= 5.5;
+        this.dropGlow = 1;
       },
     };
   }
@@ -512,14 +522,18 @@ export class FaceAlive {
     this.updateDrowse(now, dtMs);
 
     if (drop) {
-      this.widen = 0.34;
+      // Big, unmistakable flinch: eyes snap wide, pupils constrict hard, head
+      // jerks back, eyes flare bright for a beat.
+      this.widen = 1;
       this.pupilBump = -(1 - DROP_CONSTRICT_SCALE);
-      this.headJerkVel -= 2.4;
+      this.headJerkVel -= 5.5;
+      this.dropGlow = 1;
     } else if (beat) {
       this.pupilBump = Math.max(this.pupilBump, BEAT_PUPIL_BUMP * (0.5 + this.bassEnv));
     }
-    this.widen *= Math.exp(-dtMs / 450);
+    this.widen *= Math.exp(-dtMs / 650);
     this.pupilBump *= Math.exp(-dtMs / 260);
+    this.dropGlow *= Math.exp(-dtMs / 320);
 
     // Pupil: wake constriction settles toward a music-modulated baseline.
     const wakeT = Math.min(1, (now - this.startedAt) / WAKE_PUPIL_SETTLE_MS);
@@ -566,7 +580,7 @@ export class FaceAlive {
     const drowseCap = 1 - this.effectiveDrowse(now) * 0.88;
     const squint = now < this.squintUntil ? 0.82 : 1;
     const renderOpenness = Math.min(blinkOpenness, drowseCap) * squint;
-    const eyeGlow = Math.min(1.45, 0.95 + intensity * 0.35);
+    const eyeGlow = Math.min(1.9, 0.95 + intensity * 0.35 + this.dropGlow * 0.5);
 
     if (this.rig?.isReady() && this.assetsLoaded) {
       const mk = (p: FaceAlivePupilState): EyeDrawState => ({

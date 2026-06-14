@@ -90,6 +90,14 @@ try {
   await page.waitForTimeout(100);
   await shot("seek-bar-lime.png", { x: 292, y: 214, width: 175, height: 26 });
 
+  // Drop reaction: capture the eyes at rest, then mid-flinch.
+  await page.mouse.move(378, 276, { steps: 3 });
+  await page.waitForTimeout(300);
+  await shot("drop-before.png", { x: 261, y: 240, width: 234, height: 110 });
+  await page.evaluate(() => window.__faceAlive?.triggerDrop());
+  await page.waitForTimeout(90);
+  await shot("drop-after.png", { x: 261, y: 240, width: 234, height: 110 });
+
   // Report the speaker canvas screen rects so the clip can be aimed precisely.
   const rects = await page.evaluate(() => {
     const grab = (sel) =>

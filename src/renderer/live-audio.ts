@@ -308,20 +308,21 @@ export class LiveAudio {
       this.frameOnset = true;
     }
 
-    // Drop: a hard beat landing while current energy is high but the stretch
-    // 0.6–2.5s ago was much quieter — the build-up/silence before the hit.
-    if (this.frameBeat && flux > avg * 2.1 && now - this.lastDropAt > 8000) {
-      let priorSum = 0;
-      let priorCount = 0;
+    // Drop: a hard hit landing right after a recent quiet dip — the breakdown
+    // before the slam. Look at the MINIMUM energy 150–900ms ago (the dip),
+    // NOT the build-up further back. If it dipped well below the now-high
+    // level and a strong beat just landed, it's a drop. 5s refractory.
+    if (this.frameBeat && flux > avg * 1.9 && now - this.lastDropAt > 5000) {
+      let priorMin = Infinity;
       for (const h of this.energyHistory) {
         const age = now - h.t;
-        if (age > 600 && age < 2500) {
-          priorSum += h.e;
-          priorCount++;
-        }
+        if (age > 150 && age < 900) priorMin = Math.min(priorMin, h.e);
       }
-      const prior = priorCount > 8 ? priorSum / priorCount : Infinity;
-      if (this.energyEnv > 0.22 && prior < this.energyEnv * 0.55) {
+      if (
+        this.energyEnv > 0.16 &&
+        priorMin < Infinity &&
+        priorMin < this.energyEnv * 0.6
+      ) {
         this.lastDropAt = now;
         this.frameDrop = true;
       }
