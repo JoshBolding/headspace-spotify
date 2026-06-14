@@ -472,18 +472,22 @@ export class FaceAlive {
     let beat = false;
     let onset = false;
     let drop = false;
-    if (this.liveAudio) {
+    // Only consume live audio while Spotify is actually playing. Loopback
+    // captures ALL system audio, so without this gate the cones/ears/eye-glow
+    // would react to notifications, videos, and other apps when you aren't
+    // even listening to Spotify. (Doesn't isolate Spotify from OTHER audio
+    // playing simultaneously — that needs per-process capture — but it stops
+    // the common "he twitches at every system sound" case.)
+    if (this.liveAudio && this.isPlaying) {
       const fft = this.liveAudio.sample();
       if (fft) {
         bassEnergyRaw = bandEnergy(fft, 0.015, 0.1, 1.45);
         midEnergyRaw = bandEnergy(fft, 0.1, 0.38, 1.25);
         highEnergyRaw = bandEnergy(fft, 0.38, 0.78, 1.35);
       }
-      if (this.isPlaying) {
-        beat = this.liveAudio.checkBeat();
-        onset = this.liveAudio.checkOnset();
-        drop = this.liveAudio.checkDrop();
-      }
+      beat = this.liveAudio.checkBeat();
+      onset = this.liveAudio.checkOnset();
+      drop = this.liveAudio.checkDrop();
     }
     this.bassPeak = Math.max(bassEnergyRaw, this.bassPeak * BAND_PEAK_DECAY);
     this.midPeak = Math.max(midEnergyRaw, this.midPeak * BAND_PEAK_DECAY);
