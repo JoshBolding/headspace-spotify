@@ -76,6 +76,20 @@ try {
   await shot("alive-vis-menu.png", { x: 0, y: 0, width: 549, height: 394 });
   await page.mouse.click(40, 360); // dismiss
 
+  // Seek bar: force a fill width + magenta hue to verify it themes cleanly.
+  await page.evaluate(() => {
+    document.documentElement.style.setProperty("--theme-hue", "310");
+    const f = document.getElementById("seek-fill");
+    if (f) f.style.width = "46%";
+  });
+  await page.waitForTimeout(100);
+  await shot("seek-bar-magenta.png", { x: 292, y: 214, width: 175, height: 26 });
+  await page.evaluate(() => {
+    document.documentElement.style.setProperty("--theme-hue", "95");
+  });
+  await page.waitForTimeout(100);
+  await shot("seek-bar-lime.png", { x: 292, y: 214, width: 175, height: 26 });
+
   // Report the speaker canvas screen rects so the clip can be aimed precisely.
   const rects = await page.evaluate(() => {
     const grab = (sel) =>

@@ -390,8 +390,6 @@
       .ear-img,
       .drawer-edge,
       .ear-handle,
-      #seek-track,
-      #seek-fill,
       #pause-overlay,
       #transport,
       .skin-btn {
@@ -1746,28 +1744,63 @@
       }
       /* File picker is invoked via Ctrl+O or drag-drop — no visible chrome. */
 
-      /* === Seek slider (head-relative 39, 223; ~155x10) ================== */
+      /* === Seek slider (head-relative 39, 223; ~155x10) ==================
+         Drawn in CSS off --theme-hue (not the old lime bitmap, which
+         hue-rotated into muddy colors in non-lime themes). Dark inset groove
+         + themed gradient fill with subtle retro segment dividers, a soft
+         glow, and a bright leading "playhead" cap. */
       #seek-track {
         position: absolute;
         left: calc(var(--head-x) + 39px);
         top: 223px;
         width: 155px;
         height: 10px;
-        background-image: url("/progressbar.png");
-        background-repeat: no-repeat;
-        image-rendering: auto;
         z-index: 8;
         cursor: pointer;
+        border-radius: 5px;
+        background: linear-gradient(to bottom, rgba(2, 8, 0, 0.62), rgba(4, 14, 2, 0.34));
+        border: 1px solid hsla(var(--theme-hue), 55%, 50%, 0.4);
+        box-shadow:
+          inset 0 1px 2px rgba(0, 0, 0, 0.6),
+          inset 0 0 0 1px rgba(255, 255, 255, 0.04);
+        overflow: hidden;
       }
       #seek-fill {
         position: absolute;
         left: 0;
         top: 0;
         height: 100%;
-        background-image: url("/progressbar_foreground.png");
-        background-repeat: no-repeat;
-        image-rendering: auto;
+        min-width: 2px;
+        border-radius: 5px 2px 2px 5px;
         pointer-events: none;
+        background:
+          /* retro vertical segment dividers */
+          repeating-linear-gradient(
+            to right,
+            rgba(0, 0, 0, 0) 0 5px,
+            rgba(0, 0, 0, 0.28) 5px 6px
+          ),
+          /* themed fill */
+          linear-gradient(
+            to bottom,
+            hsl(var(--theme-hue), 92%, 66%),
+            hsl(var(--theme-hue), 96%, 48%) 55%,
+            hsl(var(--theme-hue), 95%, 40%)
+          );
+        box-shadow:
+          0 0 6px hsla(var(--theme-hue), 100%, 60%, 0.55),
+          inset 0 1px 0 hsla(var(--theme-hue), 100%, 82%, 0.5);
+      }
+      /* Bright leading edge / playhead at the fill's right edge. */
+      #seek-fill::after {
+        content: "";
+        position: absolute;
+        right: 0;
+        top: -1px;
+        bottom: -1px;
+        width: 2px;
+        background: hsl(var(--theme-hue), 100%, 86%);
+        box-shadow: 0 0 5px 1px hsla(var(--theme-hue), 100%, 70%, 0.9);
       }
 
       /* Status text below the head when nothing's loaded */
