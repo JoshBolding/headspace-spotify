@@ -1359,7 +1359,11 @@
                 mask-repeat: no-repeat;
         -webkit-mask-position: -2px -50px;
                 mask-position: -2px -50px;
-        z-index: 4;
+        /* Must sit ABOVE the #drag layer (z-index 6); otherwise the full-head
+           drag overlay swallows clicks meant for the Sign in button and the
+           user can never start the OAuth flow. Stays below the error toast
+           (#status-overlay, 12) and window controls (.winctl, 13). */
+        z-index: 11;
         display: none;
         align-items: center;
         justify-content: center;
