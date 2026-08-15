@@ -34,7 +34,6 @@
   },
   "dependencies": {
     "butterchurn": "^2.6.7",
-    "butterchurn-presets": "^2.4.7",
-    "music-metadata": "^11.12.3"
+    "butterchurn-presets": "^2.4.7"
   }
 }

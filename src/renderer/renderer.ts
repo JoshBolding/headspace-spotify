@@ -6,7 +6,7 @@
  * is unchanged from v1; the audio engine and library are entirely new.
  */
 
-import { Visualizer, VIS_MODES, buildSyntheticAnalysis, type VisMode } from "./visualizer";
+import { Visualizer, buildSyntheticAnalysis, type VisMode } from "./visualizer";
 import { ButterchurnViz } from "./butterchurn-viz";
 import { AudioHud } from "./audio-hud";
 import { SkinState } from "./skin-state";
@@ -954,7 +954,7 @@ function wireSpotifyAuth(onAuthed: () => void): void {
     }
   }
 
-  const transport = await Transport.create(document.getElementById("transport")!, {
+  await Transport.create(document.getElementById("transport")!, {
     onClick: (btn) => {
       if (btn === "play") {
         void runPlaybackCommand("Play", () => controller.togglePlay());
@@ -973,8 +973,6 @@ function wireSpotifyAuth(onAuthed: () => void): void {
       }
     },
   });
-  void transport;
-  void VIS_MODES;
 
   // Show current mode briefly on startup so user knows what they're seeing.
   flashVisLabel(Visualizer.labelFor(viz.getMode()));
@@ -1038,6 +1036,9 @@ function wireSpotifyAuth(onAuthed: () => void): void {
   // and feeds visualizer the current playback position + analysis on track change.
   let lastTrackId: string | null = null;
   let trackChangeToken = 0; // race guard for any per-track async work
+  // Spotify killed /audio-analysis for new apps (Nov 2024). After the first
+  // error we stop probing and go straight to the synthetic fallback.
+  let audioAnalysisUnavailable = false;
   let lastIsPlaying: boolean | null = null;
   let leftNowRenderedId: string | null = null;
   // Cache the seek-fill element so we don't re-query the DOM every state tick.
@@ -1107,17 +1108,19 @@ function wireSpotifyAuth(onAuthed: () => void): void {
         // Fetch fresh audio analysis for beat-synced modes.
         viz.setAnalysis(null);
         const trackDuration = s.track.duration_ms;
-        void window.headspace.spAnalysis(s.track.id).then((res) => {
-          if (token !== trackChangeToken) return; // stale
-          if (res && !isErrorResult(res)) {
-            viz.setAnalysis(res as never);
-          } else {
-            // Spotify killed /audio-analysis access for new apps in Nov 2024.
-            // Fall back to a synthetic 120-BPM analysis so the visualizers
-            // animate (not actually beat-synced to the song).
-            viz.setAnalysis(buildSyntheticAnalysis(trackDuration) as never);
-          }
-        });
+        if (audioAnalysisUnavailable) {
+          viz.setAnalysis(buildSyntheticAnalysis(trackDuration) as never);
+        } else {
+          void window.headspace.spAnalysis(s.track.id).then((res) => {
+            if (token !== trackChangeToken) return; // stale
+            if (res && !isErrorResult(res)) {
+              viz.setAnalysis(res as never);
+            } else {
+              audioAnalysisUnavailable = true;
+              viz.setAnalysis(buildSyntheticAnalysis(trackDuration) as never);
+            }
+          });
+        }
       }
     } else {
       nowPlaying.textContent = "— signed in, awaiting playback —";
@@ -1257,7 +1260,6 @@ function wireSpotifyAuth(onAuthed: () => void): void {
       showPlaybackError(err);
     });
     queueView.setErrorHandler(showPlaybackError);
-    void library;
     setTimeout(() => skin.togglePlaylist(), 600);
   }
 

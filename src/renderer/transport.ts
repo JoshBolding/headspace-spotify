@@ -29,14 +29,6 @@ const COLOR_TO_BUTTON: Record<string, TransportButton> = {
   "0,0,255": "vis",
 };
 
-const BUTTONS: readonly TransportButton[] = [
-  "prev",
-  "play",
-  "stop",
-  "next",
-  "vis",
-];
-
 const BTN_TO_INDEX: Record<TransportButton, number> = {
   prev: 1,
   play: 2,
@@ -218,6 +210,3 @@ function buildButtonIndex(mapData: Uint8ClampedArray): Uint8Array {
   }
   return out;
 }
-
-// Silence unused — BUTTONS constant kept for documentation/future iteration.
-void BUTTONS;

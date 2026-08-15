@@ -2,7 +2,6 @@ import {
   app,
   BrowserWindow,
   desktopCapturer,
-  dialog,
   ipcMain,
   screen,
   session,
@@ -27,8 +26,7 @@ const { components } = require("electron") as {
   };
 };
 const DEBUG_BOOT_LOGS = process.env.HEADSPACE_DEBUG_BOOT === "1";
-import { join, basename } from "path";
-import { pathToFileURL } from "url";
+import { join } from "path";
 
 import { loadConfig, REDIRECT_PORT } from "./spotify-config";
 import {
@@ -48,73 +46,6 @@ import {
 } from "./token-store";
 import * as Sp from "./spotify-api";
 import { getLyrics, type LyricsRequest } from "./lyrics";
-
-// music-metadata is ESM-only since v9; dynamic import keeps the main process CJS.
-type MMod = typeof import("music-metadata");
-let mmModule: Promise<MMod> | null = null;
-function getMM(): Promise<MMod> {
-  if (!mmModule) mmModule = import("music-metadata");
-  return mmModule;
-}
-
-interface TrackRecord {
-  path: string;
-  url: string;
-  name: string;
-  title?: string;
-  artist?: string;
-  album?: string;
-  durationSec?: number;
-}
-
-// Per-path cover-art cache populated on enrichment so subsequent getArt
-// calls are instant. Memory cost is bounded by playlist size.
-const artCache = new Map<string, string | null>();
-
-function pictureToDataUrl(pic: { format?: string; data: Buffer | Uint8Array }): string {
-  const mime = pic.format || "image/jpeg";
-  const buf = Buffer.isBuffer(pic.data) ? pic.data : Buffer.from(pic.data);
-  return `data:${mime};base64,${buf.toString("base64")}`;
-}
-
-async function readTrackMeta(path: string): Promise<TrackRecord> {
-  const url = pathToFileURL(path).href;
-  const name = basename(path);
-  try {
-    const mm = await getMM();
-    // Single pass: read tags + cover so getArt later is a cache hit.
-    const meta = await mm.parseFile(path);
-    const pic = meta.common.picture?.[0];
-    artCache.set(path, pic ? pictureToDataUrl(pic) : null);
-    return {
-      path,
-      url,
-      name,
-      title: meta.common.title?.trim() || undefined,
-      artist: meta.common.artist?.trim() || meta.common.albumartist?.trim() || undefined,
-      album: meta.common.album?.trim() || undefined,
-      durationSec: meta.format.duration ?? undefined,
-    };
-  } catch {
-    return { path, url, name };
-  }
-}
-
-async function readCoverArt(path: string): Promise<string | null> {
-  if (artCache.has(path)) return artCache.get(path) ?? null;
-  // Fallback path: track wasn't enriched (e.g. restored from localStorage).
-  try {
-    const mm = await getMM();
-    const meta = await mm.parseFile(path);
-    const pic = meta.common.picture?.[0];
-    const url = pic ? pictureToDataUrl(pic) : null;
-    artCache.set(path, url);
-    return url;
-  } catch {
-    artCache.set(path, null);
-    return null;
-  }
-}
 
 // Native skin geometry. Closed = ears tucked. We start in closed mode.
 const VIEW_W_CLOSED = 549;
@@ -167,12 +98,6 @@ function createWindow() {
 
   ipcMain.on("window:minimize", () => win?.minimize());
   ipcMain.on("window:close", () => win?.close());
-  ipcMain.on("window:set-width", (_evt, width: number) => {
-    if (!win) return;
-    const [, h] = win.getSize();
-    win.setSize(Math.round(width), h);
-  });
-
   // Smooth custom drag for the transparent, click-through shaped window.
   // Native CSS drag regions don't behave reliably with setIgnoreMouseEvents,
   // so main owns the drag and samples the OS cursor directly.
@@ -241,30 +166,6 @@ function createWindow() {
   ipcMain.on("window:set-size", (_evt, w: number, h: number) => {
     if (!win) return;
     win.setSize(Math.round(w), Math.round(h));
-  });
-
-  ipcMain.handle("files:pick", async () => {
-    if (!win) return [];
-    const result = await dialog.showOpenDialog(win, {
-      title: "Select audio files",
-      filters: [
-        {
-          name: "Audio",
-          extensions: ["mp3", "wav", "m4a", "aac", "ogg", "flac", "opus"],
-        },
-      ],
-      properties: ["openFile", "multiSelections"],
-    });
-    if (result.canceled) return [];
-    return Promise.all(result.filePaths.map(readTrackMeta));
-  });
-
-  ipcMain.handle("files:enrich", async (_evt, paths: string[]) => {
-    return Promise.all(paths.map(readTrackMeta));
-  });
-
-  ipcMain.handle("files:art", async (_evt, path: string) => {
-    return readCoverArt(path);
   });
 
   // === Spotify auth ============================================

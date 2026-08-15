@@ -5,7 +5,6 @@ import type {
   HeadspaceApi,
   LyricsRequest,
   LyricsResult,
-  LocalTrackRecord,
   SpotifyPlayOpts,
 } from "../shared/ipc-api";
 
@@ -13,7 +12,6 @@ const api = {
   hitTest: (isOverOpaque: boolean) => ipcRenderer.send("hit-test", isOverOpaque),
   minimize: () => ipcRenderer.send("window:minimize"),
   close: () => ipcRenderer.send("window:close"),
-  setWidth: (w: number) => ipcRenderer.send("window:set-width", w),
   setSize: (w: number, h: number) => ipcRenderer.send("window:set-size", w, h),
   dragStart: (dx: number, dy: number) => ipcRenderer.send("drag:start", dx, dy),
   dragEnd: () => ipcRenderer.send("drag:end"),
@@ -39,14 +37,6 @@ const api = {
   // Lyrics fetcher (lrclib.net) — returns synced LRC text + plain fallback.
   getLyrics: (req: LyricsRequest): Promise<LyricsResult> =>
     ipcRenderer.invoke("lyrics:get", req),
-
-  // Local-files API (kept for the file-picker code path; Spotify is the
-  // primary playback source but pickFiles still works for quick previews)
-  pickFiles: (): Promise<LocalTrackRecord[]> => ipcRenderer.invoke("files:pick"),
-  enrichPaths: (paths: string[]): Promise<LocalTrackRecord[]> =>
-    ipcRenderer.invoke("files:enrich", paths),
-  getArt: (path: string): Promise<string | null> =>
-    ipcRenderer.invoke("files:art", path),
 
   // Spotify OAuth
   authStatus: (): Promise<AuthStatus> => ipcRenderer.invoke("auth:status"),

@@ -76,22 +76,10 @@ export interface PagedLibrary {
   next?: boolean;
 }
 
-/** Dead local-files path — removed in the next cleanup commit. */
-export interface LocalTrackRecord {
-  path: string;
-  url: string;
-  name: string;
-  title?: string;
-  artist?: string;
-  album?: string;
-  durationSec?: number;
-}
-
 export interface HeadspaceApi {
   hitTest: (isOverOpaque: boolean) => void;
   minimize: () => void;
   close: () => void;
-  setWidth: (w: number) => void;
   setSize: (w: number, h: number) => void;
   dragStart: (dx: number, dy: number) => void;
   dragEnd: () => void;
@@ -102,10 +90,6 @@ export interface HeadspaceApi {
 
   getLoopbackSourceId: () => Promise<string | null>;
   getLyrics: (req: LyricsRequest) => Promise<LyricsResult>;
-
-  pickFiles: () => Promise<LocalTrackRecord[]>;
-  enrichPaths: (paths: string[]) => Promise<LocalTrackRecord[]>;
-  getArt: (path: string) => Promise<string | null>;
 
   authStatus: () => Promise<AuthStatus>;
   authSignIn: (opts?: {
