@@ -7,6 +7,8 @@
  */
 
 import type { SpotifyController } from "./spotify-player";
+import type { LibraryItem as SpotifyLibraryItem } from "../shared/spotify-types";
+import { isErrorResult } from "../shared/spotify-types";
 
 type Tab = "search" | "liked" | "playlists" | "recent" | "settings";
 
@@ -23,10 +25,7 @@ interface LibraryItem {
 export type QueuedLibraryItem = Readonly<LibraryItem>;
 
 interface LibraryPageResponse {
-  items: Array<
-    | { kind: "track"; track: SpotifyTrackLite; addedAt?: string }
-    | { kind: "playlist"; playlist: SpotifyPlaylistLite }
-  >;
+  items: SpotifyLibraryItem[];
   total?: number;
   next?: boolean;
 }
@@ -153,21 +152,31 @@ export class LibraryBrowser {
       | { error: string }
       | null = null;
     if (tab === "liked") {
-      result = (await window.headspace.spLiked(offset, this.pageLimit)) as typeof result;
+      result = (await window.headspace.spLiked(
+        offset,
+        this.pageLimit,
+      )) as LibraryPageResponse | { error: string };
     } else if (tab === "playlists") {
-      result = (await window.headspace.spPlaylists(offset, this.pageLimit)) as typeof result;
+      result = (await window.headspace.spPlaylists(
+        offset,
+        this.pageLimit,
+      )) as LibraryPageResponse | { error: string };
     } else if (tab === "recent") {
-      result = (await window.headspace.spRecent(50)) as typeof result;
+      result = (await window.headspace.spRecent(50)) as
+        | LibraryPageResponse
+        | { error: string };
     }
     this.isLoading = false;
     this.isAppending = false;
-    if (!result || "error" in result) {
+    if (!result || isErrorResult(result)) {
       if (!append) this.items = [];
       this.errorText =
-        result && "error" in result ? `Spotify error: ${result.error}` : "";
+        result && isErrorResult(result) ? `Spotify error: ${result.error}` : "";
     } else {
       this.errorText = "";
-      const mapped = result.items.map(toLibraryItem);
+      const mapped = result.items
+        .map(toLibraryItem)
+        .filter((item): item is LibraryItem => item !== null);
       this.items = append ? [...this.items, ...mapped] : mapped;
       this.pageOffset = offset + mapped.length;
       this.hasMore = !!result.next;
@@ -211,23 +220,20 @@ export class LibraryBrowser {
     this.resetPagination();
     this.isLoading = true;
     this.renderList();
-    const result = (await window.headspace.spSearch(this.searchQuery, 20)) as
-      | {
-          items: Array<
-            | { kind: "track"; track: SpotifyTrackLite }
-            | { kind: "playlist"; playlist: SpotifyPlaylistLite }
-          >;
-        }
-      | { error: string }
-      | null;
+    const result = (await window.headspace.spSearch(
+      this.searchQuery,
+      20,
+    )) as LibraryPageResponse | { error: string } | null;
     this.isLoading = false;
-    if (!result || "error" in result) {
+    if (!result || isErrorResult(result)) {
       this.items = [];
       this.errorText =
-        result && "error" in result ? `Spotify error: ${result.error}` : "";
+        result && isErrorResult(result) ? `Spotify error: ${result.error}` : "";
     } else {
       this.errorText = "";
-      this.items = result.items.map(toLibraryItem);
+      this.items = result.items
+        .map(toLibraryItem)
+        .filter((item): item is LibraryItem => item !== null);
     }
     this.renderList();
   }
@@ -374,15 +380,18 @@ export class LibraryBrowser {
     )) as LibraryPageResponse | { error: string } | null;
     this.isLoading = false;
     this.isAppending = false;
-    if (!result || "error" in result) {
+    if (!result || isErrorResult(result)) {
       if (!append) this.items = [];
       this.errorText =
-        result && "error" in result ? `Spotify error: ${result.error}` : "";
+        result && isErrorResult(result) ? `Spotify error: ${result.error}` : "";
     } else {
       this.errorText = "";
-      const mapped = result.items.map(toLibraryItem).map((trackItem) =>
-        trackItem.kind === "track" ? { ...trackItem, contextUri: item.uri } : trackItem,
-      );
+      const mapped = result.items
+        .map(toLibraryItem)
+        .filter((item): item is LibraryItem => item !== null)
+        .map((trackItem) =>
+          trackItem.kind === "track" ? { ...trackItem, contextUri: item.uri } : trackItem,
+        );
       this.items = append ? [...this.items, ...mapped] : mapped;
       this.pageOffset = offset + mapped.length;
       this.hasMore = !!result.next;
@@ -421,28 +430,7 @@ export class LibraryBrowser {
   }
 }
 
-interface SpotifyTrackLite {
-  id: string;
-  name: string;
-  uri: string;
-  duration_ms: number;
-  artists: { name: string }[];
-  album: { name: string; images: { url: string }[] };
-}
-
-interface SpotifyPlaylistLite {
-  id: string;
-  name: string;
-  uri: string;
-  images: { url: string }[];
-  owner: { display_name: string };
-}
-
-function toLibraryItem(
-  src:
-    | { kind: "track"; track: SpotifyTrackLite }
-    | { kind: "playlist"; playlist: SpotifyPlaylistLite },
-): LibraryItem {
+function toLibraryItem(src: SpotifyLibraryItem): LibraryItem | null {
   if (src.kind === "track") {
     const t = src.track;
     return {
@@ -454,14 +442,17 @@ function toLibraryItem(
       thumbUrl: t.album.images[t.album.images.length - 1]?.url,
     };
   }
-  const p = src.playlist;
-  const owner = p.owner?.display_name ?? "Unknown";
-  return {
-    kind: "playlist",
-    id: p.id,
-    uri: p.uri,
-    name: p.name,
-    subtitle: owner,
-    thumbUrl: p.images?.[p.images.length - 1]?.url,
-  };
+  if (src.kind === "playlist") {
+    const p = src.playlist;
+    const owner = p.owner?.display_name ?? "Unknown";
+    return {
+      kind: "playlist",
+      id: p.id,
+      uri: p.uri,
+      name: p.name,
+      subtitle: owner,
+      thumbUrl: p.images?.[p.images.length - 1]?.url,
+    };
+  }
+  return null;
 }

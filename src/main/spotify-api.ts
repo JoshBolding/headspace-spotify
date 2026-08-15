@@ -8,6 +8,33 @@
  * Reference: https://developer.spotify.com/documentation/web-api/reference/
  */
 
+import type {
+  AudioAnalysis,
+  LibraryItem,
+  PlaybackDevice,
+  PlaybackState,
+  QueueResponse,
+  SpotifyPlaylist,
+  SpotifyTrack,
+  SpotifyUser,
+} from "../shared/spotify-types";
+
+export type {
+  AudioAnalysis,
+  LibraryItem,
+  PlaybackDevice,
+  PlaybackState,
+  QueueItem,
+  QueueResponse,
+  SpotifyAlbum,
+  SpotifyArtist,
+  SpotifyEpisode,
+  SpotifyImage,
+  SpotifyPlaylist,
+  SpotifyTrack,
+  SpotifyUser,
+} from "../shared/spotify-types";
+
 const BASE = "https://api.spotify.com/v1";
 
 type GetTokenFn = () => Promise<string | null>;
@@ -43,69 +70,6 @@ async function call<T>(
   return res.json() as Promise<T>;
 }
 
-// ---------------- types we care about ----------------
-
-export interface SpotifyImage {
-  url: string;
-  height: number | null;
-  width: number | null;
-}
-
-export interface SpotifyArtist {
-  id: string;
-  name: string;
-  uri: string;
-}
-
-export interface SpotifyAlbum {
-  id: string;
-  name: string;
-  uri: string;
-  images: SpotifyImage[];
-  artists: SpotifyArtist[];
-  release_date?: string;
-}
-
-export interface SpotifyTrack {
-  id: string;
-  name: string;
-  uri: string;
-  duration_ms: number;
-  artists: SpotifyArtist[];
-  album: SpotifyAlbum;
-  is_playable?: boolean;
-  preview_url?: string | null;
-}
-
-export interface SpotifyEpisode {
-  id: string;
-  name: string;
-  uri: string;
-  duration_ms: number;
-  images?: SpotifyImage[];
-  show?: { name: string; images?: SpotifyImage[] };
-}
-
-export type SpotifyQueueItem = SpotifyTrack | SpotifyEpisode;
-
-export interface SpotifyPlaylist {
-  id: string;
-  name: string;
-  uri: string;
-  description?: string;
-  images: SpotifyImage[];
-  owner: { display_name: string; id: string };
-  tracks?: { total?: number | null };
-}
-
-export interface SpotifyUser {
-  id: string;
-  display_name: string;
-  images?: SpotifyImage[];
-  product?: "premium" | "free" | "open";
-  email?: string;
-}
-
 interface Paged<T> {
   items: T[];
   total: number;
@@ -113,11 +77,6 @@ interface Paged<T> {
   offset: number;
   limit: number;
 }
-
-export type LibraryItem =
-  | { kind: "track"; track: SpotifyTrack; addedAt?: string }
-  | { kind: "playlist"; playlist: SpotifyPlaylist }
-  | { kind: "album"; album: SpotifyAlbum };
 
 // ---------------- endpoints ----------------
 
@@ -222,15 +181,6 @@ export async function getPlaylistTracks(
 
 // ---------------- playback ----------------
 
-export interface PlaybackDevice {
-  id: string;
-  name: string;
-  type: string;
-  is_active: boolean;
-  is_restricted: boolean;
-  volume_percent?: number;
-}
-
 export async function getDevices(): Promise<PlaybackDevice[]> {
   const r = await call<{ devices: PlaybackDevice[] }>("/me/player/devices");
   return r.devices;
@@ -300,15 +250,6 @@ export async function setVolume(percent: number, deviceId?: string) {
   await call(`/me/player/volume${params}`, { method: "PUT" }, false);
 }
 
-export interface PlaybackState {
-  is_playing: boolean;
-  progress_ms: number;
-  device?: PlaybackDevice;
-  item?: SpotifyTrack;
-  shuffle_state?: boolean;
-  repeat_state?: "off" | "track" | "context";
-}
-
 export async function getPlaybackState(): Promise<PlaybackState | null> {
   try {
     return await call<PlaybackState | null>("/me/player");
@@ -317,13 +258,8 @@ export async function getPlaybackState(): Promise<PlaybackState | null> {
   }
 }
 
-export async function getQueue(): Promise<{
-  currently_playing: SpotifyQueueItem | null;
-  queue: SpotifyQueueItem[];
-}> {
-  return call<{ currently_playing: SpotifyQueueItem | null; queue: SpotifyQueueItem[] }>(
-    "/me/player/queue",
-  );
+export async function getQueue(): Promise<QueueResponse> {
+  return call<QueueResponse>("/me/player/queue");
 }
 
 export async function addToQueue(uri: string, deviceId?: string) {
@@ -333,50 +269,6 @@ export async function addToQueue(uri: string, deviceId?: string) {
 }
 
 // ---------------- audio analysis ----------------
-
-export interface AudioAnalysisSegment {
-  start: number;
-  duration: number;
-  confidence: number;
-  loudness_start: number;
-  loudness_max: number;
-  loudness_max_time: number;
-  loudness_end: number;
-  pitches: number[];
-  timbre: number[];
-}
-
-export interface AudioAnalysisInterval {
-  start: number;
-  duration: number;
-  confidence: number;
-}
-
-export interface AudioAnalysisSection {
-  start: number;
-  duration: number;
-  confidence: number;
-  loudness: number;
-  tempo: number;
-  key: number;
-  mode: number;
-}
-
-export interface AudioAnalysis {
-  track: {
-    duration: number;
-    tempo: number;
-    loudness: number;
-    key: number;
-    mode: number;
-    time_signature: number;
-  };
-  segments: AudioAnalysisSegment[];
-  beats: AudioAnalysisInterval[];
-  bars: AudioAnalysisInterval[];
-  tatums: AudioAnalysisInterval[];
-  sections: AudioAnalysisSection[];
-}
 
 export async function getAudioAnalysis(trackId: string): Promise<AudioAnalysis> {
   return call<AudioAnalysis>(`/audio-analysis/${trackId}`);

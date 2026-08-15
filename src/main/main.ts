@@ -148,7 +148,7 @@ function createWindow() {
     win.loadURL(devUrl);
     win.webContents.openDevTools({ mode: "detach" });
   } else {
-    win.loadFile(join(__dirname, "..", "dist-renderer", "index.html"));
+    win.loadFile(join(__dirname, "..", "..", "dist-renderer", "index.html"));
   }
 
   let isDragging = false;

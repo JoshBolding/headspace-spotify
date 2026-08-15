@@ -8,14 +8,12 @@
  * SDK reference: https://developer.spotify.com/documentation/web-playback-sdk
  */
 
-interface SpotifyTrack {
-  id: string;
-  uri: string;
-  name: string;
-  duration_ms: number;
-  artists: { name: string; uri: string }[];
-  album: { name: string; uri: string; images: { url: string }[] };
-}
+import type {
+  PlaybackDevice,
+  PlaybackState,
+  SpotifyTrack,
+} from "../shared/spotify-types";
+import { isErrorResult } from "../shared/spotify-types";
 
 export interface SpotifyState {
   track: SpotifyTrack | null;
@@ -62,14 +60,6 @@ interface RawSdkState {
 export type Mode = "sdk" | "connect" | "uninitialized";
 
 type Listener = (s: SpotifyState) => void;
-
-interface SpotifyDevice {
-  id: string;
-  name: string;
-  type: string;
-  is_active: boolean;
-  is_restricted: boolean;
-}
 
 export interface SpotifyControllerDiagnostics {
   mode: Mode;
@@ -329,16 +319,8 @@ export class SpotifyController {
     }
     const poll = async () => {
       try {
-        const r = (await window.headspace.spState()) as
-          | {
-              item?: SpotifyTrack;
-              is_playing: boolean;
-              progress_ms: number;
-            device?: { id?: string; name?: string; type?: string };
-          }
-          | { error: string }
-          | null;
-        if (r && !("error" in r) && r.item) {
+        const r = (await window.headspace.spState()) as PlaybackState | { error: string } | null;
+        if (r && !isErrorResult(r) && r.item) {
           const progressMs = r.progress_ms || 0;
           this.lastState = {
             track: r.item,
@@ -376,7 +358,7 @@ export class SpotifyController {
    */
   private async getActiveConnectDeviceId(): Promise<string | null> {
     const result = (await window.headspace.spDevices()) as
-      | SpotifyDevice[]
+      | PlaybackDevice[]
       | { error: string };
     if (!Array.isArray(result)) {
       this.recordCommandError("devices", result.error);
@@ -425,12 +407,12 @@ export class SpotifyController {
     if (!this.player || !this.deviceId) return;
     try {
       const state = (await window.headspace.spState()) as
-        | { device?: { id?: string } }
+        | PlaybackState
         | { error: string }
         | null;
       const activeId =
-        state && !("error" in state) ? state.device?.id : undefined;
-      if (state && "error" in state) {
+        state && !isErrorResult(state) ? state.device?.id : undefined;
+      if (state && isErrorResult(state)) {
         this.recordCommandError("state", state.error);
       }
       if (activeId === this.deviceId) {

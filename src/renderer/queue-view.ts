@@ -1,26 +1,12 @@
+import type { QueueItem, QueueResponse } from "../shared/spotify-types";
+import { isErrorResult } from "../shared/spotify-types";
 import type { SpotifyController, SpotifyState } from "./spotify-player";
-
-interface QueueTrack {
-  id: string;
-  name: string;
-  uri: string;
-  duration_ms: number;
-  artists?: { name: string }[];
-  album?: { name: string; images: { url: string }[] };
-  images?: { url: string }[];
-  show?: { name: string; images?: { url: string }[] };
-}
-
-interface QueueResponse {
-  currently_playing: QueueTrack | null;
-  queue: QueueTrack[];
-}
 
 export class QueueView {
   private container: HTMLElement;
   private controller: SpotifyController;
-  private current: QueueTrack | null = null;
-  private items: QueueTrack[] = [];
+  private current: QueueItem | null = null;
+  private items: QueueItem[] = [];
   private loading = false;
   private refreshTimer: number | null = null;
   private lastTrackId: string | null = null;
@@ -53,12 +39,15 @@ export class QueueView {
     if (this.loading) return;
     this.loading = true;
     this.render();
-    const res = (await window.headspace.spQueue()) as QueueResponse | { error: string } | null;
+    const res = (await window.headspace.spQueue()) as
+      | QueueResponse
+      | { error: string }
+      | null;
     this.loading = false;
-    if (!res || "error" in res) {
+    if (!res || isErrorResult(res)) {
       this.current = null;
       this.items = [];
-      this.render(res && "error" in res ? res.error : undefined);
+      this.render(res && isErrorResult(res) ? res.error : undefined);
       return;
     }
     this.current = res.currently_playing;
@@ -123,7 +112,7 @@ export class QueueView {
     this.container.appendChild(empty);
   }
 
-  private row(item: QueueTrack, current: boolean, index = 0) {
+  private row(item: QueueItem, current: boolean, index = 0) {
     const row = document.createElement("button");
     row.className = current ? "qv-row qv-current" : "qv-row";
     row.title = current ? "Currently playing" : "Play this item";
@@ -133,7 +122,10 @@ export class QueueView {
       if (!result.ok) this.onError?.(result.error);
     });
 
-    const thumbUrl = item.album?.images?.at(-1)?.url ?? item.images?.at(-1)?.url ?? item.show?.images?.at(-1)?.url;
+    const thumbUrl =
+      "album" in item
+        ? item.album?.images?.at(-1)?.url
+        : item.images?.at(-1)?.url ?? item.show?.images?.at(-1)?.url;
     if (thumbUrl) {
       const img = document.createElement("img");
       img.className = "qv-thumb";
@@ -154,7 +146,10 @@ export class QueueView {
     name.textContent = item.name;
     const sub = document.createElement("div");
     sub.className = "qv-sub";
-    sub.textContent = item.artists?.map((a) => a.name).join(", ") || item.show?.name || item.album?.name || "";
+    sub.textContent =
+      "artists" in item
+        ? item.artists.map((a) => a.name).join(", ") || item.album?.name || ""
+        : item.show?.name || "";
     text.append(name, sub);
     row.appendChild(text);
 
