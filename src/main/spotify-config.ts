@@ -45,20 +45,30 @@ export function loadConfig(): Config {
   if (cached) return cached;
   let clientId = process.env.SPOTIFY_CLIENT_ID;
   if (!clientId) {
-    const envPath = path.join(app.getAppPath(), ".env");
-    try {
-      const text = fs.readFileSync(envPath, "utf8");
-      for (const line of text.split(/\r?\n/)) {
-        const m = line.match(/^\s*SPOTIFY_CLIENT_ID\s*=\s*(.+?)\s*$/);
-        if (m) clientId = m[1].replace(/^["']|["']$/g, "");
+    const candidates = [
+      path.join(app.getAppPath(), ".env"),
+      path.join(path.dirname(app.getPath("exe")), ".env"),
+      path.join(app.getPath("userData"), ".env"),
+    ];
+    for (const envPath of candidates) {
+      try {
+        const text = fs.readFileSync(envPath, "utf8");
+        for (const line of text.split(/\r?\n/)) {
+          const m = line.match(/^\s*SPOTIFY_CLIENT_ID\s*=\s*(.+?)\s*$/);
+          if (m) {
+            clientId = m[1].replace(/^["']|["']$/g, "");
+            break;
+          }
+        }
+        if (clientId) break;
+      } catch {
+        /* try the next location */
       }
-    } catch {
-      /* missing .env is fine; we'll throw below if env var also missing */
     }
   }
   if (!clientId) {
     throw new Error(
-      "SPOTIFY_CLIENT_ID is not set. Add it to .env in the app root or set the env var.",
+      "SPOTIFY_CLIENT_ID is not set. Add it to .env next to the app, in userData, or set the env var.",
     );
   }
   cached = { clientId, redirectUri: REDIRECT_URI, scopes: SPOTIFY_SCOPES };

@@ -71,6 +71,24 @@ Run Electron against the built renderer:
 npm run electron:dev
 ```
 
+## Packaging
+
+Windows installer and portable build (uses the installed Castlabs/Widevine Electron):
+
+```powershell
+npm run dist
+```
+
+Output lands in `release/`. Put a `.env` with `SPOTIFY_CLIENT_ID` next to the installed exe (or in `%APPDATA%\headspace-spotify\`).
+
+Unpackaged dir build (faster, no installer):
+
+```powershell
+npm run pack
+```
+
+CI runs `npm test` on Windows for every push/PR. Installers build on tags or a manual workflow dispatch.
+
 ## Notes
 
 - In-app Spotify playback requires a Spotify Premium account and Widevine support through the Castlabs Electron build.

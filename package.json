@@ -1,6 +1,7 @@
 {
   "name": "headspace-spotify",
   "version": "0.0.1",
+  "author": "Josh Bolding",
   "description": "Headspace skin reborn as a Spotify client — alien-head music player with library browsing, beat-synced visuals, and modern features.",
   "repository": {
     "type": "git",
@@ -23,12 +24,63 @@
     "build": "npm run build:main && npm run build:renderer",
     "start": "npm run build && electron .",
     "electron:dev": "npm run build:main && electron .",
-    "test": "npm run build && playwright test"
+    "test": "npm run build && playwright test",
+    "pack": "npm run build && electron-builder --dir --publish never",
+    "dist": "npm run build && electron-builder --publish never"
+  },
+  "build": {
+    "appId": "com.joshbolding.headspace-spotify",
+    "productName": "Headspace Spotify",
+    "copyright": "Copyright © Josh Bolding",
+    "electronVersion": "41.1.1",
+    "electronDist": "node_modules/electron/dist",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist-main/**/*",
+      "dist-renderer/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "assets/converted/head.png",
+        "to": "head.png"
+      }
+    ],
+    "win": {
+      "icon": "assets/converted/head.png",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Headspace Spotify"
+    },
+    "portable": {
+      "artifactName": "${productName}-${version}-portable.${ext}"
+    }
   },
   "devDependencies": {
     "@playwright/test": "^1.59.1",
     "@types/node": "^22.0.0",
     "electron": "github:castlabs/electron-releases#v41.1.1+wvcus",
+    "electron-builder": "^26.15.3",
     "typescript": "^5.6.0",
     "vite": "^5.4.0"
   },

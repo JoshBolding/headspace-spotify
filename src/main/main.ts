@@ -30,6 +30,7 @@ const { components } = require("electron") as {
   };
 };
 const DEBUG_BOOT_LOGS = process.env.HEADSPACE_DEBUG_BOOT === "1";
+import { existsSync } from "node:fs";
 import { join } from "path";
 
 import {
@@ -468,7 +469,11 @@ function setupTrayAndHotkeys(): void {
   if (process.env.HEADSPACE_FACE_TEST === "1") return;
   if (tray) return;
 
-  const iconPath = join(app.getAppPath(), "assets", "converted", "head.png");
+  const iconPath = [
+    join(app.getAppPath(), "dist-renderer", "head.png"),
+    join(process.resourcesPath ?? "", "head.png"),
+    join(app.getAppPath(), "assets", "converted", "head.png"),
+  ].find((p) => existsSync(p)) ?? join(app.getAppPath(), "assets", "converted", "head.png");
   const icon = nativeImage.createFromPath(iconPath);
   tray = new Tray(icon.isEmpty() ? nativeImage.createEmpty() : icon.resize({ width: 16, height: 16 }));
   tray.setToolTip("Headspace");
@@ -515,45 +520,75 @@ async function loadWidevine(): Promise<void> {
     lastComponentsStatus = { error: "components_api_unavailable" };
     return;
   }
-  try {
-    if (DEBUG_BOOT_LOGS) console.log("[headspace] waiting for Widevine components...");
-    const t0 = Date.now();
-    const required = components.WIDEVINE_CDM_ID
-      ? [components.WIDEVINE_CDM_ID]
-      : undefined;
-    const result = await components.whenReady(required);
-    const elapsed = Date.now() - t0;
-    const status = components.status?.();
-    const diag = {
-      ready: true,
-      elapsedMs: elapsed,
-      updatesEnabled: components.updatesEnabled,
-      widevineId: components.WIDEVINE_CDM_ID,
-      mediaFoundationWidevineId: components.MEDIA_FOUNDATION_WIDEVINE_CDM_ID,
-      result,
-      status,
-    };
-    if (DEBUG_BOOT_LOGS) {
-      console.log(
-        `[headspace] Widevine components ready in ${elapsed}ms`,
-        JSON.stringify(diag, null, 2),
+  // Don't hard-require WIDEVINE_CDM_ID. On Windows the Media Foundation
+  // CDM is the one that actually installs; requiring the classic id throws
+  // "Failed to install required components" even when MF Widevine is fine.
+  // Castlabs' own sample just calls whenReady() with no filter.
+  const attempts: Array<string[] | undefined> = [undefined];
+  if (components.MEDIA_FOUNDATION_WIDEVINE_CDM_ID) {
+    attempts.push([components.MEDIA_FOUNDATION_WIDEVINE_CDM_ID]);
+  }
+  if (components.WIDEVINE_CDM_ID) {
+    attempts.push([components.WIDEVINE_CDM_ID]);
+  }
+
+  let lastErr: unknown;
+  for (const required of attempts) {
+    try {
+      if (DEBUG_BOOT_LOGS) {
+        console.log("[headspace] waiting for Widevine...", required ?? "(any)");
+      }
+      const t0 = Date.now();
+      const result = await components.whenReady(required);
+      const diag = {
+        ready: true,
+        elapsedMs: Date.now() - t0,
+        updatesEnabled: components.updatesEnabled,
+        widevineId: components.WIDEVINE_CDM_ID,
+        mediaFoundationWidevineId: components.MEDIA_FOUNDATION_WIDEVINE_CDM_ID,
+        required: required ?? null,
+        result,
+        status: components.status?.(),
+      };
+      if (DEBUG_BOOT_LOGS) {
+        console.log("[headspace] Widevine ready", JSON.stringify(diag, null, 2));
+      }
+      lastComponentsStatus = diag;
+      return;
+    } catch (err) {
+      lastErr = err;
+      console.warn(
+        "[headspace] Widevine whenReady failed",
+        required ?? "(any)",
+        err,
       );
     }
-    lastComponentsStatus = diag;
-  } catch (err) {
-    console.warn("[headspace] Widevine components failed:", err);
-    const e = err as Error;
-    lastComponentsStatus = {
-      ready: false,
-      error: String(err),
-      name: e?.name,
-      errors: (err as { errors?: unknown }).errors,
-      stack: e?.stack?.split("\n").slice(0, 5).join("\n"),
-    };
   }
+
+  const e = lastErr as Error;
+  lastComponentsStatus = {
+    ready: false,
+    error: String(lastErr),
+    name: e?.name,
+    errors: (lastErr as { errors?: unknown })?.errors,
+    stack: e?.stack?.split("\n").slice(0, 5).join("\n"),
+  };
 }
 
+const gotTheLock = app.requestSingleInstanceLock();
+if (!gotTheLock) {
+  app.quit();
+}
+
+app.on("second-instance", () => {
+  if (!win) return;
+  if (win.isMinimized()) win.restore();
+  win.show();
+  win.focus();
+});
+
 app.whenReady().then(async () => {
+  if (!gotTheLock) return;
   await loadWidevine();
 
   // Register a getDisplayMedia handler so the renderer can grab system-audio
