@@ -22,7 +22,10 @@ import { LiveAudio } from "./live-audio";
 import { extractPalette, DEFAULT_PALETTE } from "./palette";
 import { THEMES, getTheme, applyTheme, autoThemeFromHue } from "./themes";
 import { STORAGE_KEYS } from "./storage-keys";
-import { FaceAlive, NOSE_CLICKS_REQUIRED, type FaceAliveDebugApi } from "./face-alive";
+import { FaceAlive, NOSE_CLICKS_REQUIRED } from "./face-alive";
+import type { AuthStatus } from "../shared/spotify-types";
+import { isErrorResult } from "../shared/spotify-types";
+import type { ComponentStatus, WidevineDiag } from "../shared/ipc-api";
 import { attachMediaSession } from "./media-session";
 import { QueueView } from "./queue-view";
 import {
@@ -30,94 +33,6 @@ import {
   findActiveLineIndex,
   type LyricsTrack,
 } from "./lyrics";
-
-interface AuthStatus {
-  authenticated: boolean;
-  expiresAt?: number;
-  scope?: string;
-}
-
-interface ComponentStatus {
-  status?: string;
-  title?: string | null;
-  version?: string | null;
-}
-
-interface WidevineDiag {
-  ready?: boolean;
-  error?: string;
-  name?: string;
-  errors?: unknown;
-  widevineId?: string;
-  result?: ComponentStatus[];
-  status?: Record<string, ComponentStatus>;
-}
-
-interface SystemDiag {
-  electronVersion: string;
-  chromeVersion: string;
-  nodeVersion?: string;
-  platform?: string;
-  userDataPath?: string;
-  components?: WidevineDiag;
-}
-
-declare global {
-  interface Window {
-    __faceAlive?: FaceAliveDebugApi;
-    headspace: {
-      hitTest: (isOverOpaque: boolean) => void;
-      minimize: () => void;
-      close: () => void;
-      setSize: (w: number, h: number) => void;
-      dragStart: (dx: number, dy: number) => void;
-      dragEnd: () => void;
-      toggleOnTop: () => void;
-      setAliveCursorTracking: (on: boolean) => void;
-      onAliveCursor: (cb: (pos: { x: number; y: number }) => void) => () => void;
-
-      authStatus: () => Promise<AuthStatus>;
-      authSignIn: (opts?: { showDialog?: boolean }) => Promise<{ success: boolean; error?: string }>;
-      authSignOut: () => Promise<boolean>;
-      authGetToken: () => Promise<string | null>;
-      onAuthChanged: (cb: (status: AuthStatus) => void) => () => void;
-
-      spUser: () => Promise<unknown>;
-      spLiked: (offset: number, limit: number) => Promise<unknown>;
-      spPlaylists: (offset: number, limit: number) => Promise<unknown>;
-      spRecent: (limit: number) => Promise<unknown>;
-      spSearch: (query: string, limit: number) => Promise<unknown>;
-      spPlaylistTracks: (id: string, offset: number, limit: number) => Promise<unknown>;
-      spDevices: () => Promise<unknown>;
-      spTransfer: (deviceId: string, play: boolean) => Promise<unknown>;
-      spPlay: (opts: object) => Promise<unknown>;
-      spPause: (deviceId?: string) => Promise<unknown>;
-      spNext: (deviceId?: string) => Promise<unknown>;
-      spPrevious: (deviceId?: string) => Promise<unknown>;
-      spSeek: (positionMs: number, deviceId?: string) => Promise<unknown>;
-      spSetVolume: (percent: number, deviceId?: string) => Promise<unknown>;
-      spState: () => Promise<unknown>;
-      spQueue: () => Promise<unknown>;
-      spAddQueue: (uri: string, deviceId?: string) => Promise<unknown>;
-      spAnalysis: (trackId: string) => Promise<unknown>;
-      systemDiag: () => Promise<unknown>;
-      systemResetWidevine: () => Promise<unknown>;
-      getLoopbackSourceId: () => Promise<string | null>;
-      getLyrics: (req: {
-        trackId: string;
-        artist: string;
-        track: string;
-        album?: string;
-        durationSec?: number;
-      }) => Promise<{
-        synced: string | null;
-        plain: string | null;
-        instrumental: boolean;
-        source: string;
-      }>;
-    };
-  }
-}
 
 const HEAD_W = 234;
 const HEAD_H = 394;
@@ -952,10 +867,9 @@ function wireSpotifyAuth(onAuthed: () => void): void {
 
     let accountLine = "Signed in to Spotify.";
     const user = await window.headspace.spUser();
-    if (user && typeof user === "object" && !("error" in user)) {
-      const profile = user as { display_name?: string; email?: string; id?: string };
-      const name = profile.display_name || profile.id || "Spotify user";
-      accountLine = `Signed in as ${name}${profile.email ? `\n${profile.email}` : ""}.`;
+    if (user && !isErrorResult(user)) {
+      const name = user.display_name || user.id || "Spotify user";
+      accountLine = `Signed in as ${name}${user.email ? `\n${user.email}` : ""}.`;
     }
 
     body.textContent = accountLine;
@@ -1019,7 +933,7 @@ function wireSpotifyAuth(onAuthed: () => void): void {
 
   async function renderRuntimeDiagnostics(container: HTMLElement) {
     container.innerHTML = "";
-    const diag = (await window.headspace.systemDiag()) as SystemDiag;
+    const diag = await window.headspace.systemDiag();
     const playback = controller.getDiagnostics();
     const widevine = summarizeWidevineDiag(diag.components);
     const rows: Array<[string, string]> = [
@@ -1195,7 +1109,7 @@ function wireSpotifyAuth(onAuthed: () => void): void {
         const trackDuration = s.track.duration_ms;
         void window.headspace.spAnalysis(s.track.id).then((res) => {
           if (token !== trackChangeToken) return; // stale
-          if (res && typeof res === "object" && !("error" in (res as object))) {
+          if (res && !isErrorResult(res)) {
             viz.setAnalysis(res as never);
           } else {
             // Spotify killed /audio-analysis access for new apps in Nov 2024.
@@ -1268,11 +1182,7 @@ function wireSpotifyAuth(onAuthed: () => void): void {
       void tryEnableLiveAudio();
       console.warn("[headspace] SDK init failed:", result.error);
       // Pull diag info so the user can see whether Widevine actually loaded.
-      const diag = (await window.headspace.systemDiag()) as {
-        electronVersion: string;
-        chromeVersion: string;
-        components?: WidevineDiag;
-      };
+      const diag = await window.headspace.systemDiag();
       const componentSummary = summarizeWidevineDiag(diag.components);
       const widevineFailed = componentSummary.failed;
       const sdkError = result.error ?? "unknown";
@@ -1294,10 +1204,7 @@ function wireSpotifyAuth(onAuthed: () => void): void {
                       "Clearing cached components and reinstalling. This can take 30–60 seconds.",
                       { durationMs: 0 },
                     );
-                    const r = (await window.headspace.systemResetWidevine()) as {
-                      removed: string[];
-                      components: unknown;
-                    };
+                    const r = await window.headspace.systemResetWidevine();
                     console.log("[headspace] reset result:", r);
                     showStatus(
                       "Retrying SDK...",

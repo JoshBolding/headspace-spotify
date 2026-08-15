@@ -1,22 +1,15 @@
 import { contextBridge, ipcRenderer } from "electron";
 
-interface TrackRecord {
-  path: string;
-  url: string;
-  name: string;
-  title?: string;
-  artist?: string;
-  album?: string;
-  durationSec?: number;
-}
+import type {
+  AuthStatus,
+  HeadspaceApi,
+  LyricsRequest,
+  LyricsResult,
+  LocalTrackRecord,
+  SpotifyPlayOpts,
+} from "../shared/ipc-api";
 
-interface AuthStatus {
-  authenticated: boolean;
-  expiresAt?: number;
-  scope?: string;
-}
-
-contextBridge.exposeInMainWorld("headspace", {
+const api = {
   hitTest: (isOverOpaque: boolean) => ipcRenderer.send("hit-test", isOverOpaque),
   minimize: () => ipcRenderer.send("window:minimize"),
   close: () => ipcRenderer.send("window:close"),
@@ -44,23 +37,13 @@ contextBridge.exposeInMainWorld("headspace", {
     ipcRenderer.invoke("system:loopback-source-id"),
 
   // Lyrics fetcher (lrclib.net) — returns synced LRC text + plain fallback.
-  getLyrics: (req: {
-    trackId: string;
-    artist: string;
-    track: string;
-    album?: string;
-    durationSec?: number;
-  }): Promise<{
-    synced: string | null;
-    plain: string | null;
-    instrumental: boolean;
-    source: string;
-  }> => ipcRenderer.invoke("lyrics:get", req),
+  getLyrics: (req: LyricsRequest): Promise<LyricsResult> =>
+    ipcRenderer.invoke("lyrics:get", req),
 
   // Local-files API (kept for the file-picker code path; Spotify is the
   // primary playback source but pickFiles still works for quick previews)
-  pickFiles: (): Promise<TrackRecord[]> => ipcRenderer.invoke("files:pick"),
-  enrichPaths: (paths: string[]): Promise<TrackRecord[]> =>
+  pickFiles: (): Promise<LocalTrackRecord[]> => ipcRenderer.invoke("files:pick"),
+  enrichPaths: (paths: string[]): Promise<LocalTrackRecord[]> =>
     ipcRenderer.invoke("files:enrich", paths),
   getArt: (path: string): Promise<string | null> =>
     ipcRenderer.invoke("files:art", path),
@@ -91,7 +74,7 @@ contextBridge.exposeInMainWorld("headspace", {
   spDevices: () => ipcRenderer.invoke("sp:devices"),
   spTransfer: (deviceId: string, play: boolean) =>
     ipcRenderer.invoke("sp:transfer", deviceId, play),
-  spPlay: (opts: object) => ipcRenderer.invoke("sp:play", opts),
+  spPlay: (opts: SpotifyPlayOpts) => ipcRenderer.invoke("sp:play", opts),
   spPause: (deviceId?: string) => ipcRenderer.invoke("sp:pause", deviceId),
   spNext: (deviceId?: string) => ipcRenderer.invoke("sp:next", deviceId),
   spPrevious: (deviceId?: string) => ipcRenderer.invoke("sp:previous", deviceId),
@@ -106,4 +89,6 @@ contextBridge.exposeInMainWorld("headspace", {
   spAnalysis: (trackId: string) => ipcRenderer.invoke("sp:analysis", trackId),
   systemDiag: () => ipcRenderer.invoke("system:diag"),
   systemResetWidevine: () => ipcRenderer.invoke("system:reset-widevine"),
-});
+} satisfies HeadspaceApi;
+
+contextBridge.exposeInMainWorld("headspace", api);

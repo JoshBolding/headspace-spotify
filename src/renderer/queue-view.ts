@@ -1,4 +1,4 @@
-import type { QueueItem, QueueResponse } from "../shared/spotify-types";
+import type { QueueItem } from "../shared/spotify-types";
 import { isErrorResult } from "../shared/spotify-types";
 import type { SpotifyController, SpotifyState } from "./spotify-player";
 
@@ -39,10 +39,7 @@ export class QueueView {
     if (this.loading) return;
     this.loading = true;
     this.render();
-    const res = (await window.headspace.spQueue()) as
-      | QueueResponse
-      | { error: string }
-      | null;
+    const res = await window.headspace.spQueue();
     this.loading = false;
     if (!res || isErrorResult(res)) {
       this.current = null;

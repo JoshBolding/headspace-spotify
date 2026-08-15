@@ -8,11 +8,8 @@
  * SDK reference: https://developer.spotify.com/documentation/web-playback-sdk
  */
 
-import type {
-  PlaybackDevice,
-  PlaybackState,
-  SpotifyTrack,
-} from "../shared/spotify-types";
+import type { SpotifyPlayOpts } from "../shared/ipc-api";
+import type { SpotifyTrack } from "../shared/spotify-types";
 import { isErrorResult } from "../shared/spotify-types";
 
 export interface SpotifyState {
@@ -319,7 +316,7 @@ export class SpotifyController {
     }
     const poll = async () => {
       try {
-        const r = (await window.headspace.spState()) as PlaybackState | { error: string } | null;
+        const r = await window.headspace.spState();
         if (r && !isErrorResult(r) && r.item) {
           const progressMs = r.progress_ms || 0;
           this.lastState = {
@@ -357,9 +354,7 @@ export class SpotifyController {
    * steal active playback at any time.
    */
   private async getActiveConnectDeviceId(): Promise<string | null> {
-    const result = (await window.headspace.spDevices()) as
-      | PlaybackDevice[]
-      | { error: string };
+    const result = await window.headspace.spDevices();
     if (!Array.isArray(result)) {
       this.recordCommandError("devices", result.error);
       return null;
@@ -406,10 +401,7 @@ export class SpotifyController {
   private async ensureSdkIsActive(): Promise<void> {
     if (!this.player || !this.deviceId) return;
     try {
-      const state = (await window.headspace.spState()) as
-        | PlaybackState
-        | { error: string }
-        | null;
+      const state = await window.headspace.spState();
       const activeId =
         state && !isErrorResult(state) ? state.device?.id : undefined;
       if (state && isErrorResult(state)) {
@@ -475,7 +467,7 @@ export class SpotifyController {
       return { ok: false, error: "no_device" };
     }
     await this.ensureSdkIsActive();
-    const opts: Record<string, unknown> = { deviceId };
+    const opts: SpotifyPlayOpts = { deviceId };
     if (contextUri) {
       opts.contextUri = contextUri;
       opts.offsetUri = uri;

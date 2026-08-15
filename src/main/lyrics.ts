@@ -9,6 +9,10 @@
  * lrclib endpoint is fast enough that session-only is fine for now.
  */
 
+import type { LyricsRequest, LyricsResult } from "../shared/ipc-api";
+
+export type { LyricsRequest, LyricsResult };
+
 interface LrclibResponse {
   id?: number;
   trackName?: string;
@@ -20,22 +24,7 @@ interface LrclibResponse {
   syncedLyrics?: string | null;
 }
 
-export interface LyricsResult {
-  synced: string | null;
-  plain: string | null;
-  instrumental: boolean;
-  source: "lrclib" | "cache" | "none";
-}
-
 const cache = new Map<string, LyricsResult>();
-
-export interface LyricsRequest {
-  trackId: string;
-  artist: string;
-  track: string;
-  album?: string;
-  durationSec?: number;
-}
 
 export async function getLyrics(req: LyricsRequest): Promise<LyricsResult> {
   const cached = cache.get(req.trackId);

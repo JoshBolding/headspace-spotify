@@ -152,19 +152,11 @@ export class LibraryBrowser {
       | { error: string }
       | null = null;
     if (tab === "liked") {
-      result = (await window.headspace.spLiked(
-        offset,
-        this.pageLimit,
-      )) as LibraryPageResponse | { error: string };
+      result = await window.headspace.spLiked(offset, this.pageLimit);
     } else if (tab === "playlists") {
-      result = (await window.headspace.spPlaylists(
-        offset,
-        this.pageLimit,
-      )) as LibraryPageResponse | { error: string };
+      result = await window.headspace.spPlaylists(offset, this.pageLimit);
     } else if (tab === "recent") {
-      result = (await window.headspace.spRecent(50)) as
-        | LibraryPageResponse
-        | { error: string };
+      result = await window.headspace.spRecent(50);
     }
     this.isLoading = false;
     this.isAppending = false;
@@ -220,10 +212,7 @@ export class LibraryBrowser {
     this.resetPagination();
     this.isLoading = true;
     this.renderList();
-    const result = (await window.headspace.spSearch(
-      this.searchQuery,
-      20,
-    )) as LibraryPageResponse | { error: string } | null;
+    const result = await window.headspace.spSearch(this.searchQuery, 20);
     this.isLoading = false;
     if (!result || isErrorResult(result)) {
       this.items = [];
@@ -373,11 +362,11 @@ export class LibraryBrowser {
     this.isLoading = !append;
     this.renderList();
     const offset = append ? this.pageOffset : 0;
-    const result = (await window.headspace.spPlaylistTracks(
+    const result = await window.headspace.spPlaylistTracks(
       item.id,
       offset,
       this.pageLimit,
-    )) as LibraryPageResponse | { error: string } | null;
+    );
     this.isLoading = false;
     this.isAppending = false;
     if (!result || isErrorResult(result)) {
