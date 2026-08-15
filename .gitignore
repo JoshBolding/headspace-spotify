@@ -2,7 +2,11 @@ node_modules/
 dist/
 dist-main/
 dist-renderer/
+release/
 .env
 *.log
 .DS_Store
 Thumbs.db
+.test-artifacts/
+test-results/
+playwright-report/

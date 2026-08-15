@@ -1,30 +1,34 @@
 import { contextBridge, ipcRenderer } from "electron";
 
-interface TrackRecord {
-  path: string;
-  url: string;
-  name: string;
-  title?: string;
-  artist?: string;
-  album?: string;
-  durationSec?: number;
-}
+import type {
+  AuthStatus,
+  HeadspaceApi,
+  LyricsRequest,
+  LyricsResult,
+  RepeatState,
+  SpotifyPlayOpts,
+} from "../shared/ipc-api";
 
-interface AuthStatus {
-  authenticated: boolean;
-  expiresAt?: number;
-  scope?: string;
-}
-
-contextBridge.exposeInMainWorld("headspace", {
+const api = {
   hitTest: (isOverOpaque: boolean) => ipcRenderer.send("hit-test", isOverOpaque),
   minimize: () => ipcRenderer.send("window:minimize"),
   close: () => ipcRenderer.send("window:close"),
-  setWidth: (w: number) => ipcRenderer.send("window:set-width", w),
   setSize: (w: number, h: number) => ipcRenderer.send("window:set-size", w, h),
   dragStart: (dx: number, dy: number) => ipcRenderer.send("drag:start", dx, dy),
   dragEnd: () => ipcRenderer.send("drag:end"),
   toggleOnTop: () => ipcRenderer.send("window:toggle-on-top"),
+  isFaceTest: () => process.env.HEADSPACE_FACE_TEST === "1",
+
+  // Global cursor tracking for alive-mode eyes. While enabled, main polls the
+  // OS cursor position (works anywhere on screen, even off the window) and
+  // streams it window-relative so the eyes can follow the cursor everywhere.
+  setAliveCursorTracking: (on: boolean) =>
+    ipcRenderer.send("alive:set-cursor-tracking", on),
+  onAliveCursor: (cb: (pos: { x: number; y: number }) => void) => {
+    const listener = (_evt: unknown, pos: { x: number; y: number }) => cb(pos);
+    ipcRenderer.on("alive:cursor", listener);
+    return () => ipcRenderer.removeListener("alive:cursor", listener);
+  },
 
   // Returns a desktopCapturer screen source ID. Renderer feeds this into
   // getUserMedia({ chromeMediaSource: 'desktop', chromeMediaSourceId }) to
@@ -33,26 +37,8 @@ contextBridge.exposeInMainWorld("headspace", {
     ipcRenderer.invoke("system:loopback-source-id"),
 
   // Lyrics fetcher (lrclib.net) — returns synced LRC text + plain fallback.
-  getLyrics: (req: {
-    trackId: string;
-    artist: string;
-    track: string;
-    album?: string;
-    durationSec?: number;
-  }): Promise<{
-    synced: string | null;
-    plain: string | null;
-    instrumental: boolean;
-    source: string;
-  }> => ipcRenderer.invoke("lyrics:get", req),
-
-  // Local-files API (kept for the file-picker code path; Spotify is the
-  // primary playback source but pickFiles still works for quick previews)
-  pickFiles: (): Promise<TrackRecord[]> => ipcRenderer.invoke("files:pick"),
-  enrichPaths: (paths: string[]): Promise<TrackRecord[]> =>
-    ipcRenderer.invoke("files:enrich", paths),
-  getArt: (path: string): Promise<string | null> =>
-    ipcRenderer.invoke("files:art", path),
+  getLyrics: (req: LyricsRequest): Promise<LyricsResult> =>
+    ipcRenderer.invoke("lyrics:get", req),
 
   // Spotify OAuth
   authStatus: (): Promise<AuthStatus> => ipcRenderer.invoke("auth:status"),
@@ -73,6 +59,8 @@ contextBridge.exposeInMainWorld("headspace", {
   spPlaylists: (offset: number, limit: number) =>
     ipcRenderer.invoke("sp:playlists", offset, limit),
   spRecent: (limit: number) => ipcRenderer.invoke("sp:recent", limit),
+  spTop: (offset: number, limit: number) =>
+    ipcRenderer.invoke("sp:top", offset, limit),
   spSearch: (query: string, limit: number) =>
     ipcRenderer.invoke("sp:search", query, limit),
   spPlaylistTracks: (playlistId: string, offset: number, limit: number) =>
@@ -80,7 +68,7 @@ contextBridge.exposeInMainWorld("headspace", {
   spDevices: () => ipcRenderer.invoke("sp:devices"),
   spTransfer: (deviceId: string, play: boolean) =>
     ipcRenderer.invoke("sp:transfer", deviceId, play),
-  spPlay: (opts: object) => ipcRenderer.invoke("sp:play", opts),
+  spPlay: (opts: SpotifyPlayOpts) => ipcRenderer.invoke("sp:play", opts),
   spPause: (deviceId?: string) => ipcRenderer.invoke("sp:pause", deviceId),
   spNext: (deviceId?: string) => ipcRenderer.invoke("sp:next", deviceId),
   spPrevious: (deviceId?: string) => ipcRenderer.invoke("sp:previous", deviceId),
@@ -93,6 +81,15 @@ contextBridge.exposeInMainWorld("headspace", {
   spAddQueue: (uri: string, deviceId?: string) =>
     ipcRenderer.invoke("sp:add-queue", uri, deviceId),
   spAnalysis: (trackId: string) => ipcRenderer.invoke("sp:analysis", trackId),
+  spLikedContains: (ids: string[]) => ipcRenderer.invoke("sp:liked-contains", ids),
+  spSaveTracks: (ids: string[]) => ipcRenderer.invoke("sp:save-tracks", ids),
+  spUnsaveTracks: (ids: string[]) => ipcRenderer.invoke("sp:unsave-tracks", ids),
+  spShuffle: (state: boolean, deviceId?: string) =>
+    ipcRenderer.invoke("sp:shuffle", state, deviceId),
+  spRepeat: (state: RepeatState, deviceId?: string) =>
+    ipcRenderer.invoke("sp:repeat", state, deviceId),
   systemDiag: () => ipcRenderer.invoke("system:diag"),
   systemResetWidevine: () => ipcRenderer.invoke("system:reset-widevine"),
-});
+} satisfies HeadspaceApi;
+
+contextBridge.exposeInMainWorld("headspace", api);

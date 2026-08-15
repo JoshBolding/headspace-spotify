@@ -6,7 +6,7 @@ Headspace Spotify is currently a builder/demo project rather than a packaged pub
 
 - Users must create their own Spotify app and provide `SPOTIFY_CLIENT_ID`.
 - The Spotify redirect URI must be configured manually as `http://127.0.0.1:8888/callback`.
-- There is no packaged installer yet.
+- A Windows installer is available via `npm run dist` (output in `release/`). CI builds it on tags. Packaged copies still need a `.env` with `SPOTIFY_CLIENT_ID` next to the exe or in the app's userData folder.
 
 ## Playback
 

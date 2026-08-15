@@ -7,8 +7,10 @@
  */
 
 import type { SpotifyController } from "./spotify-player";
+import type { LibraryItem as SpotifyLibraryItem } from "../shared/spotify-types";
+import { isErrorResult } from "../shared/spotify-types";
 
-type Tab = "search" | "liked" | "playlists" | "recent" | "settings";
+type Tab = "search" | "liked" | "playlists" | "recent" | "top" | "settings";
 
 interface LibraryItem {
   kind: "track" | "playlist";
@@ -22,12 +24,19 @@ interface LibraryItem {
 
 export type QueuedLibraryItem = Readonly<LibraryItem>;
 
-const TAB_ORDER: Tab[] = ["search", "liked", "playlists", "recent"];
+interface LibraryPageResponse {
+  items: SpotifyLibraryItem[];
+  total?: number;
+  next?: boolean;
+}
+
+const TAB_ORDER: Tab[] = ["search", "liked", "playlists", "recent", "top"];
 const TAB_TITLES: Record<Tab, string> = {
   search: "Search",
   liked: "Liked",
   playlists: "Playlists",
   recent: "Recent",
+  top: "Top",
   settings: "Settings",
 };
 
@@ -40,6 +49,12 @@ export class LibraryBrowser {
   private searchQuery = "";
   private searchTimer: number | null = null;
   private errorText = "";
+  private activePlaylist: LibraryItem | null = null;
+  private pageOffset = 0;
+  private pageLimit = 50;
+  private hasMore = false;
+  private total = 0;
+  private isAppending = false;
 
   private tabsEl: HTMLDivElement;
   private tabLabelEl: HTMLDivElement;
@@ -101,12 +116,16 @@ export class LibraryBrowser {
       b.addEventListener("click", () => this.switchTab(t));
       this.tabsEl.appendChild(b);
     }
-    this.tabLabelEl.textContent = TAB_TITLES[this.currentTab];
+    this.tabLabelEl.textContent = this.activePlaylist
+      ? "Playlist"
+      : TAB_TITLES[this.currentTab];
   }
 
   async switchTab(tab: Tab) {
     if (tab === this.currentTab) return;
     this.currentTab = tab;
+    this.activePlaylist = null;
+    this.resetPagination();
     this.renderTabs();
     this.inputEl.style.display = tab === "search" ? "block" : "none";
     if (tab === "search") {
@@ -122,35 +141,50 @@ export class LibraryBrowser {
     }
   }
 
-  private async loadTab(tab: Exclude<Tab, "search" | "settings">) {
-    this.isLoading = true;
+  private async loadTab(tab: Exclude<Tab, "search" | "settings">, append = false) {
+    this.activePlaylist = null;
+    if (!append) this.resetPagination();
+    else this.isAppending = true;
+    this.isLoading = !append;
     this.renderList();
+    const offset = append ? this.pageOffset : 0;
     let result:
-      | {
-          items: Array<
-            | { kind: "track"; track: SpotifyTrackLite; addedAt?: string }
-            | { kind: "playlist"; playlist: SpotifyPlaylistLite }
-          >;
-        }
+      | LibraryPageResponse
       | { error: string }
       | null = null;
     if (tab === "liked") {
-      result = (await window.headspace.spLiked(0, 50)) as typeof result;
+      result = await window.headspace.spLiked(offset, this.pageLimit);
     } else if (tab === "playlists") {
-      result = (await window.headspace.spPlaylists(0, 50)) as typeof result;
+      result = await window.headspace.spPlaylists(offset, this.pageLimit);
     } else if (tab === "recent") {
-      result = (await window.headspace.spRecent(50)) as typeof result;
+      result = await window.headspace.spRecent(50);
+    } else if (tab === "top") {
+      result = await window.headspace.spTop(offset, this.pageLimit);
     }
     this.isLoading = false;
-    if (!result || "error" in result) {
-      this.items = [];
+    this.isAppending = false;
+    if (!result || isErrorResult(result)) {
+      if (!append) this.items = [];
       this.errorText =
-        result && "error" in result ? `Spotify error: ${result.error}` : "";
+        result && isErrorResult(result) ? `Spotify error: ${result.error}` : "";
     } else {
       this.errorText = "";
-      this.items = result.items.map(toLibraryItem);
+      const mapped = result.items
+        .map(toLibraryItem)
+        .filter((item): item is LibraryItem => item !== null);
+      this.items = append ? [...this.items, ...mapped] : mapped;
+      this.pageOffset = offset + mapped.length;
+      this.hasMore = !!result.next;
+      this.total = result.total ?? this.items.length;
     }
     this.renderList();
+  }
+
+  private resetPagination() {
+    this.pageOffset = 0;
+    this.hasMore = false;
+    this.total = 0;
+    this.isAppending = false;
   }
 
   private async renderSettingsPanel() {
@@ -173,28 +207,25 @@ export class LibraryBrowser {
     if (!this.searchQuery.trim()) {
       this.items = [];
       this.errorText = "";
+      this.resetPagination();
       this.renderList();
       return;
     }
+    this.activePlaylist = null;
+    this.resetPagination();
     this.isLoading = true;
     this.renderList();
-    const result = (await window.headspace.spSearch(this.searchQuery, 20)) as
-      | {
-          items: Array<
-            | { kind: "track"; track: SpotifyTrackLite }
-            | { kind: "playlist"; playlist: SpotifyPlaylistLite }
-          >;
-        }
-      | { error: string }
-      | null;
+    const result = await window.headspace.spSearch(this.searchQuery, 20);
     this.isLoading = false;
-    if (!result || "error" in result) {
+    if (!result || isErrorResult(result)) {
       this.items = [];
       this.errorText =
-        result && "error" in result ? `Spotify error: ${result.error}` : "";
+        result && isErrorResult(result) ? `Spotify error: ${result.error}` : "";
     } else {
       this.errorText = "";
-      this.items = result.items.map(toLibraryItem);
+      this.items = result.items
+        .map(toLibraryItem)
+        .filter((item): item is LibraryItem => item !== null);
     }
     this.renderList();
   }
@@ -202,6 +233,7 @@ export class LibraryBrowser {
   private renderList() {
     this.listEl.classList.remove("lb-settings-list");
     this.listEl.innerHTML = "";
+    if (this.activePlaylist) this.renderPlaylistHeader();
     if (this.isLoading) {
       const li = document.createElement("div");
       li.className = "lb-empty";
@@ -262,6 +294,48 @@ export class LibraryBrowser {
 
       this.listEl.appendChild(row);
     }
+    if (this.hasMore) this.renderMoreButton();
+  }
+
+  private renderPlaylistHeader() {
+    if (!this.activePlaylist) return;
+    const header = document.createElement("div");
+    header.className = "lb-playlist-header";
+    const back = document.createElement("button");
+    back.className = "lb-mini-btn";
+    back.textContent = "BACK";
+    back.addEventListener("click", () => {
+      void this.loadTab("playlists");
+    });
+    const title = document.createElement("div");
+    title.className = "lb-playlist-title";
+    title.textContent = this.activePlaylist.name;
+    title.title = this.activePlaylist.name;
+    const play = document.createElement("button");
+    play.className = "lb-mini-btn lb-mini-primary";
+    play.textContent = "PLAY";
+    play.addEventListener("click", async () => {
+      if (!this.activePlaylist) return;
+      const result = await this.controller.playContext(this.activePlaylist.uri);
+      if (!result.ok) this.onError?.(result.error);
+    });
+    header.append(back, title, play);
+    this.listEl.appendChild(header);
+  }
+
+  private renderMoreButton() {
+    const more = document.createElement("button");
+    more.className = "lb-more";
+    more.disabled = this.isAppending;
+    const loaded = this.total ? ` (${Math.min(this.pageOffset, this.total)}/${this.total})` : "";
+    more.textContent = this.isAppending ? "Loading..." : `Load more${loaded}`;
+    more.addEventListener("click", () => {
+      if (this.activePlaylist) void this.loadPlaylist(this.activePlaylist, true);
+      else if (this.currentTab !== "search" && this.currentTab !== "settings") {
+        void this.loadTab(this.currentTab, true);
+      }
+    });
+    this.listEl.appendChild(more);
   }
 
   private onError: ((err: string) => void) | null = null;
@@ -271,11 +345,51 @@ export class LibraryBrowser {
   }
 
   private async onItemClick(item: LibraryItem) {
+    if (item.kind === "playlist") {
+      await this.loadPlaylist(item);
+      return;
+    }
     const r =
-      item.kind === "track"
-        ? await this.controller.playTrack(item.uri, item.contextUri)
-        : await this.controller.playContext(item.uri);
+      await this.controller.playTrack(item.uri, item.contextUri);
     if (!r.ok) this.onError?.(r.error);
+  }
+
+  private async loadPlaylist(item: LibraryItem, append = false) {
+    if (item.kind !== "playlist") return;
+    this.currentTab = "playlists";
+    this.activePlaylist = item;
+    this.inputEl.style.display = "none";
+    this.renderTabs();
+    if (!append) this.resetPagination();
+    else this.isAppending = true;
+    this.isLoading = !append;
+    this.renderList();
+    const offset = append ? this.pageOffset : 0;
+    const result = await window.headspace.spPlaylistTracks(
+      item.id,
+      offset,
+      this.pageLimit,
+    );
+    this.isLoading = false;
+    this.isAppending = false;
+    if (!result || isErrorResult(result)) {
+      if (!append) this.items = [];
+      this.errorText =
+        result && isErrorResult(result) ? `Spotify error: ${result.error}` : "";
+    } else {
+      this.errorText = "";
+      const mapped = result.items
+        .map(toLibraryItem)
+        .filter((item): item is LibraryItem => item !== null)
+        .map((trackItem) =>
+          trackItem.kind === "track" ? { ...trackItem, contextUri: item.uri } : trackItem,
+        );
+      this.items = append ? [...this.items, ...mapped] : mapped;
+      this.pageOffset = offset + mapped.length;
+      this.hasMore = !!result.next;
+      this.total = result.total ?? this.items.length;
+    }
+    this.renderList();
   }
 
   private async onQueueClick(item: LibraryItem, btn: HTMLButtonElement) {
@@ -308,28 +422,7 @@ export class LibraryBrowser {
   }
 }
 
-interface SpotifyTrackLite {
-  id: string;
-  name: string;
-  uri: string;
-  duration_ms: number;
-  artists: { name: string }[];
-  album: { name: string; images: { url: string }[] };
-}
-
-interface SpotifyPlaylistLite {
-  id: string;
-  name: string;
-  uri: string;
-  images: { url: string }[];
-  owner: { display_name: string };
-}
-
-function toLibraryItem(
-  src:
-    | { kind: "track"; track: SpotifyTrackLite }
-    | { kind: "playlist"; playlist: SpotifyPlaylistLite },
-): LibraryItem {
+function toLibraryItem(src: SpotifyLibraryItem): LibraryItem | null {
   if (src.kind === "track") {
     const t = src.track;
     return {
@@ -341,14 +434,17 @@ function toLibraryItem(
       thumbUrl: t.album.images[t.album.images.length - 1]?.url,
     };
   }
-  const p = src.playlist;
-  const owner = p.owner?.display_name ?? "Unknown";
-  return {
-    kind: "playlist",
-    id: p.id,
-    uri: p.uri,
-    name: p.name,
-    subtitle: owner,
-    thumbUrl: p.images?.[p.images.length - 1]?.url,
-  };
+  if (src.kind === "playlist") {
+    const p = src.playlist;
+    const owner = p.owner?.display_name ?? "Unknown";
+    return {
+      kind: "playlist",
+      id: p.id,
+      uri: p.uri,
+      name: p.name,
+      subtitle: owner,
+      thumbUrl: p.images?.[p.images.length - 1]?.url,
+    };
+  }
+  return null;
 }

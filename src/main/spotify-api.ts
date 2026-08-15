@@ -8,9 +8,37 @@
  * Reference: https://developer.spotify.com/documentation/web-api/reference/
  */
 
+import type {
+  AudioAnalysis,
+  LibraryItem,
+  PlaybackDevice,
+  PlaybackState,
+  QueueResponse,
+  RepeatState,
+  SpotifyPlaylist,
+  SpotifyTrack,
+  SpotifyUser,
+} from "../shared/spotify-types";
+
+export type {
+  AudioAnalysis,
+  LibraryItem,
+  PlaybackDevice,
+  PlaybackState,
+  QueueItem,
+  QueueResponse,
+  SpotifyAlbum,
+  SpotifyArtist,
+  SpotifyEpisode,
+  SpotifyImage,
+  SpotifyPlaylist,
+  SpotifyTrack,
+  SpotifyUser,
+} from "../shared/spotify-types";
+
 const BASE = "https://api.spotify.com/v1";
 
-type GetTokenFn = () => Promise<string | null>;
+type GetTokenFn = (opts?: { forceRefresh?: boolean }) => Promise<string | null>;
 
 let getToken: GetTokenFn = async () => null;
 
@@ -18,92 +46,67 @@ export function configureSpotifyApi(fn: GetTokenFn) {
   getToken = fn;
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+/** Retry-After seconds, or an HTTP-date, or exponential backoff if absent. */
+function retryAfterMs(res: Response, attempt: number): number {
+  const raw = res.headers.get("retry-after");
+  if (raw) {
+    const seconds = Number(raw);
+    if (Number.isFinite(seconds) && seconds >= 0) return seconds * 1000;
+    const when = Date.parse(raw);
+    if (Number.isFinite(when)) return Math.max(0, when - Date.now());
+  }
+  return 500 * 2 ** (attempt - 1);
+}
+
 async function call<T>(
   pathOrUrl: string,
   init: RequestInit = {},
   expectJson = true,
 ): Promise<T> {
-  const token = await getToken();
+  let token = await getToken();
   if (!token) throw new Error("not_authenticated");
   const url = pathOrUrl.startsWith("http") ? pathOrUrl : `${BASE}${pathOrUrl}`;
-  const res = await fetch(url, {
-    ...init,
-    headers: {
-      Authorization: `Bearer ${token}`,
-      ...(init.body ? { "Content-Type": "application/json" } : {}),
-      ...(init.headers || {}),
-    },
-  });
-  if (res.status === 204) return undefined as T;
-  if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new Error(`Spotify ${res.status}: ${text || res.statusText}`);
+  const MAX_ATTEMPTS = 3;
+  let did401Retry = false;
+
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    const res = await fetch(url, {
+      ...init,
+      headers: {
+        Authorization: `Bearer ${token}`,
+        ...(init.body ? { "Content-Type": "application/json" } : {}),
+        ...(init.headers || {}),
+      },
+    });
+
+    if (res.status === 401 && !did401Retry) {
+      did401Retry = true;
+      const fresh = await getToken({ forceRefresh: true });
+      if (fresh) {
+        token = fresh;
+        continue;
+      }
+    }
+
+    if (res.status === 429 && attempt < MAX_ATTEMPTS) {
+      await sleep(retryAfterMs(res, attempt));
+      continue;
+    }
+
+    if (res.status === 204) return undefined as T;
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new Error(`Spotify ${res.status}: ${text || res.statusText}`);
+    }
+    if (!expectJson) return undefined as T;
+    return res.json() as Promise<T>;
   }
-  if (!expectJson) return undefined as T;
-  return res.json() as Promise<T>;
-}
 
-// ---------------- types we care about ----------------
-
-export interface SpotifyImage {
-  url: string;
-  height: number | null;
-  width: number | null;
-}
-
-export interface SpotifyArtist {
-  id: string;
-  name: string;
-  uri: string;
-}
-
-export interface SpotifyAlbum {
-  id: string;
-  name: string;
-  uri: string;
-  images: SpotifyImage[];
-  artists: SpotifyArtist[];
-  release_date?: string;
-}
-
-export interface SpotifyTrack {
-  id: string;
-  name: string;
-  uri: string;
-  duration_ms: number;
-  artists: SpotifyArtist[];
-  album: SpotifyAlbum;
-  is_playable?: boolean;
-  preview_url?: string | null;
-}
-
-export interface SpotifyEpisode {
-  id: string;
-  name: string;
-  uri: string;
-  duration_ms: number;
-  images?: SpotifyImage[];
-  show?: { name: string; images?: SpotifyImage[] };
-}
-
-export type SpotifyQueueItem = SpotifyTrack | SpotifyEpisode;
-
-export interface SpotifyPlaylist {
-  id: string;
-  name: string;
-  uri: string;
-  description?: string;
-  images: SpotifyImage[];
-  owner: { display_name: string; id: string };
-  tracks?: { total?: number | null };
-}
-
-export interface SpotifyUser {
-  id: string;
-  display_name: string;
-  images?: SpotifyImage[];
-  product?: "premium" | "free" | "open";
-  email?: string;
+  throw new Error("Spotify request failed after retries");
 }
 
 interface Paged<T> {
@@ -113,11 +116,6 @@ interface Paged<T> {
   offset: number;
   limit: number;
 }
-
-export type LibraryItem =
-  | { kind: "track"; track: SpotifyTrack; addedAt?: string }
-  | { kind: "playlist"; playlist: SpotifyPlaylist }
-  | { kind: "album"; album: SpotifyAlbum };
 
 // ---------------- endpoints ----------------
 
@@ -222,15 +220,6 @@ export async function getPlaylistTracks(
 
 // ---------------- playback ----------------
 
-export interface PlaybackDevice {
-  id: string;
-  name: string;
-  type: string;
-  is_active: boolean;
-  is_restricted: boolean;
-  volume_percent?: number;
-}
-
 export async function getDevices(): Promise<PlaybackDevice[]> {
   const r = await call<{ devices: PlaybackDevice[] }>("/me/player/devices");
   return r.devices;
@@ -300,15 +289,6 @@ export async function setVolume(percent: number, deviceId?: string) {
   await call(`/me/player/volume${params}`, { method: "PUT" }, false);
 }
 
-export interface PlaybackState {
-  is_playing: boolean;
-  progress_ms: number;
-  device?: PlaybackDevice;
-  item?: SpotifyTrack;
-  shuffle_state?: boolean;
-  repeat_state?: "off" | "track" | "context";
-}
-
 export async function getPlaybackState(): Promise<PlaybackState | null> {
   try {
     return await call<PlaybackState | null>("/me/player");
@@ -317,13 +297,8 @@ export async function getPlaybackState(): Promise<PlaybackState | null> {
   }
 }
 
-export async function getQueue(): Promise<{
-  currently_playing: SpotifyQueueItem | null;
-  queue: SpotifyQueueItem[];
-}> {
-  return call<{ currently_playing: SpotifyQueueItem | null; queue: SpotifyQueueItem[] }>(
-    "/me/player/queue",
-  );
+export async function getQueue(): Promise<QueueResponse> {
+  return call<QueueResponse>("/me/player/queue");
 }
 
 export async function addToQueue(uri: string, deviceId?: string) {
@@ -334,50 +309,59 @@ export async function addToQueue(uri: string, deviceId?: string) {
 
 // ---------------- audio analysis ----------------
 
-export interface AudioAnalysisSegment {
-  start: number;
-  duration: number;
-  confidence: number;
-  loudness_start: number;
-  loudness_max: number;
-  loudness_max_time: number;
-  loudness_end: number;
-  pitches: number[];
-  timbre: number[];
-}
-
-export interface AudioAnalysisInterval {
-  start: number;
-  duration: number;
-  confidence: number;
-}
-
-export interface AudioAnalysisSection {
-  start: number;
-  duration: number;
-  confidence: number;
-  loudness: number;
-  tempo: number;
-  key: number;
-  mode: number;
-}
-
-export interface AudioAnalysis {
-  track: {
-    duration: number;
-    tempo: number;
-    loudness: number;
-    key: number;
-    mode: number;
-    time_signature: number;
-  };
-  segments: AudioAnalysisSegment[];
-  beats: AudioAnalysisInterval[];
-  bars: AudioAnalysisInterval[];
-  tatums: AudioAnalysisInterval[];
-  sections: AudioAnalysisSection[];
-}
-
 export async function getAudioAnalysis(trackId: string): Promise<AudioAnalysis> {
   return call<AudioAnalysis>(`/audio-analysis/${trackId}`);
+}
+
+// ---------------- library extras ----------------
+
+export async function getTopTracks(
+  offset = 0,
+  limit = 50,
+  timeRange: "short_term" | "medium_term" | "long_term" = "medium_term",
+): Promise<{ items: LibraryItem[]; total: number; next: boolean }> {
+  const res = await call<Paged<SpotifyTrack>>(
+    `/me/top/tracks?offset=${offset}&limit=${limit}&time_range=${timeRange}`,
+  );
+  return {
+    items: res.items.map((track) => ({ kind: "track" as const, track })),
+    total: res.total,
+    next: !!res.next,
+  };
+}
+
+export async function tracksAreSaved(ids: string[]): Promise<boolean[]> {
+  if (!ids.length) return [];
+  const safe = ids.filter(Boolean).slice(0, 50);
+  return call<boolean[]>(`/me/tracks/contains?ids=${safe.join(",")}`);
+}
+
+export async function saveTracks(ids: string[]): Promise<void> {
+  if (!ids.length) return;
+  await call(
+    "/me/tracks",
+    { method: "PUT", body: JSON.stringify({ ids: ids.slice(0, 50) }) },
+    false,
+  );
+}
+
+export async function removeSavedTracks(ids: string[]): Promise<void> {
+  if (!ids.length) return;
+  await call(
+    "/me/tracks",
+    { method: "DELETE", body: JSON.stringify({ ids: ids.slice(0, 50) }) },
+    false,
+  );
+}
+
+export async function setShuffle(state: boolean, deviceId?: string): Promise<void> {
+  const params = new URLSearchParams({ state: state ? "true" : "false" });
+  if (deviceId) params.set("device_id", deviceId);
+  await call(`/me/player/shuffle?${params.toString()}`, { method: "PUT" }, false);
+}
+
+export async function setRepeat(state: RepeatState, deviceId?: string): Promise<void> {
+  const params = new URLSearchParams({ state });
+  if (deviceId) params.set("device_id", deviceId);
+  await call(`/me/player/repeat?${params.toString()}`, { method: "PUT" }, false);
 }

@@ -46,6 +46,19 @@ export class SkinState {
     return this.plOpen;
   }
 
+  get isEqOpen() {
+    return this.eqOpen;
+  }
+
+  closeAll() {
+    this.plEar.style.transform = `translateX(0)`;
+    this.eqEar.style.transform = `translateX(0)`;
+    this.plHandleBtn.classList.remove("open");
+    this.eqHandleBtn.classList.remove("open");
+    this.plOpen = false;
+    this.eqOpen = false;
+  }
+
   togglePlaylist() {
     if (this.plOpen) {
       // Close: slide ear back first, then shrink window when slide finishes.

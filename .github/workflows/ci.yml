@@ -1,0 +1,58 @@
+# Build + the Playwright face-alive suite on every push/PR.
+# Windows-only: the suite launches the real Castlabs Electron binary.
+name: CI
+
+on:
+  push:
+    branches: [main, "eyes/**"]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - name: Install
+        run: npm ci
+      - name: Test
+        run: npm test
+        env:
+          HEADSPACE_FACE_TEST: "1"
+      - name: Upload failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-artifacts
+          path: |
+            .test-artifacts
+            test-results
+            playwright-report
+          if-no-files-found: ignore
+
+  pack:
+    needs: test
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/')
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - name: Install
+        run: npm ci
+      - name: Package
+        run: npm run dist
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-installer
+          path: release
+          if-no-files-found: error

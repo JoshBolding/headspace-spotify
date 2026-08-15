@@ -8,20 +8,17 @@
  * SDK reference: https://developer.spotify.com/documentation/web-playback-sdk
  */
 
-interface SpotifyTrack {
-  id: string;
-  uri: string;
-  name: string;
-  duration_ms: number;
-  artists: { name: string; uri: string }[];
-  album: { name: string; uri: string; images: { url: string }[] };
-}
+import type { SpotifyPlayOpts } from "../shared/ipc-api";
+import type { RepeatState, SpotifyTrack } from "../shared/spotify-types";
+import { isErrorResult } from "../shared/spotify-types";
 
 export interface SpotifyState {
   track: SpotifyTrack | null;
   isPlaying: boolean;
   positionMs: number;
   durationMs: number;
+  shuffle: boolean;
+  repeat: RepeatState;
 }
 
 declare global {
@@ -56,16 +53,40 @@ interface RawSdkState {
   paused: boolean;
   position: number;
   duration: number;
+  shuffle?: boolean;
+  repeat_mode?: 0 | 1 | 2;
   track_window: { current_track: SpotifyTrack };
+}
+
+function repeatFromSdk(mode?: 0 | 1 | 2): RepeatState {
+  if (mode === 2) return "track";
+  if (mode === 1) return "context";
+  return "off";
 }
 
 export type Mode = "sdk" | "connect" | "uninitialized";
 
 type Listener = (s: SpotifyState) => void;
 
+export interface SpotifyControllerDiagnostics {
+  mode: Mode;
+  deviceId: string | null;
+  deviceName: string | null;
+  deviceType: string | null;
+  lastError: string | null;
+  lastCommand: string | null;
+  lastCommandAt: number | null;
+  isPlaying: boolean;
+  trackName: string | null;
+}
+
+export type PlaybackCommandResult = { ok: true } | { ok: false; error: string };
+
 export class SpotifyController {
   private player: SpotifyPlayerInstance | null = null;
   private deviceId: string | null = null;
+  private deviceName: string | null = null;
+  private deviceType: string | null = null;
   private mode: Mode = "uninitialized";
   private listeners = new Set<Listener>();
   private connectPollHandle: number | null = null;
@@ -74,10 +95,17 @@ export class SpotifyController {
     isPlaying: false,
     positionMs: 0,
     durationMs: 0,
+    shuffle: false,
+    repeat: "off",
   };
+  private liked = false;
+  private likedTrackId: string | null = null;
   private localPositionStartedAt = 0;
   private localPositionBaseMs = 0;
   private positionRafHandle: number | null = null;
+  private lastCommandError: string | null = null;
+  private lastCommand: string | null = null;
+  private lastCommandAt: number | null = null;
 
   on(l: Listener): () => void {
     this.listeners.add(l);
@@ -96,6 +124,20 @@ export class SpotifyController {
     return this.deviceId;
   }
 
+  getDiagnostics(): SpotifyControllerDiagnostics {
+    return {
+      mode: this.mode,
+      deviceId: this.deviceId,
+      deviceName: this.deviceName,
+      deviceType: this.deviceType,
+      lastError: this.lastCommandError,
+      lastCommand: this.lastCommand,
+      lastCommandAt: this.lastCommandAt,
+      isPlaying: this.lastState.isPlaying,
+      trackName: this.lastState.track?.name ?? null,
+    };
+  }
+
   /** Try SDK first; fall back to Connect mode on Premium failure. */
   async init(): Promise<{ mode: Mode; error?: string }> {
     const sdkResult = await this.tryInitSdk();
@@ -111,6 +153,7 @@ export class SpotifyController {
     if (this.mode !== "connect") {
       this.mode = "connect";
       this.startConnectPolling();
+      this.startLocalPositionTicker();
     }
     return { mode: "connect", error: sdkResult.error };
   }
@@ -156,12 +199,16 @@ export class SpotifyController {
       const evt = args[0] as { device_id: string };
       console.log("[spotify] SDK ready, device_id:", evt.device_id);
       this.deviceId = evt.device_id;
+      this.deviceName = "Headspace";
+      this.deviceType = "SDK";
       ready = true;
     });
     player.addListener("not_ready", (...args) => {
       const evt = args[0] as { device_id: string };
       console.warn("[spotify] SDK not_ready:", evt.device_id);
       this.deviceId = null;
+      this.deviceName = null;
+      this.deviceType = null;
     });
     player.addListener("initialization_error", (...args) => {
       const evt = args[0] as { message: string };
@@ -245,6 +292,8 @@ export class SpotifyController {
       isPlaying: !raw.paused,
       positionMs: raw.position,
       durationMs: raw.duration,
+      shuffle: raw.shuffle ?? this.lastState.shuffle,
+      repeat: raw.repeat_mode !== undefined ? repeatFromSdk(raw.repeat_mode) : this.lastState.repeat,
     };
     this.localPositionBaseMs = raw.position;
     this.localPositionStartedAt = performance.now();
@@ -277,19 +326,30 @@ export class SpotifyController {
   }
 
   private startConnectPolling() {
+    if (this.connectPollHandle !== null) {
+      window.clearInterval(this.connectPollHandle);
+      this.connectPollHandle = null;
+    }
     const poll = async () => {
       try {
-        const r = (await window.headspace.spState()) as
-          | { item?: SpotifyTrack; is_playing: boolean; progress_ms: number }
-          | { error: string }
-          | null;
-        if (r && !("error" in r) && r.item) {
+        const r = await window.headspace.spState();
+        if (r && !isErrorResult(r) && r.item) {
+          const progressMs = r.progress_ms || 0;
           this.lastState = {
             track: r.item,
             isPlaying: r.is_playing,
-            positionMs: r.progress_ms || 0,
+            positionMs: progressMs,
             durationMs: r.item.duration_ms,
+            shuffle: r.shuffle_state ?? this.lastState.shuffle,
+            repeat: r.repeat_state ?? this.lastState.repeat,
           };
+          if (r.device?.id) {
+            this.deviceId = r.device.id;
+            this.deviceName = r.device.name ?? this.deviceName;
+            this.deviceType = r.device.type ?? this.deviceType;
+          }
+          this.localPositionBaseMs = progressMs;
+          this.localPositionStartedAt = performance.now();
           this.emit();
         }
       } catch {
@@ -307,29 +367,45 @@ export class SpotifyController {
   // -------- public playback methods --------
 
   /**
-   * Make sure we have a device to send commands to. SDK mode always has one.
-   * Connect mode needs an *active* device — Spotify rejects play attempts on
-   * dormant devices with a 404. We refuse to try in that case so the user
-   * gets a clear "open Spotify on a device" message instead of a confusing 404.
+   * Return the current active Connect device. This intentionally does not
+   * trust a cached device id: phones, browser tabs, and the desktop client can
+   * steal active playback at any time.
    */
-  private async ensureDeviceId(): Promise<string | null> {
-    if (this.deviceId) return this.deviceId;
-    const result = (await window.headspace.spDevices()) as
-      | Array<{
-          id: string;
-          name: string;
-          type: string;
-          is_active: boolean;
-          is_restricted: boolean;
-        }>
-      | { error: string };
-    if (!Array.isArray(result) || !result.length) return null;
+  private async getActiveConnectDeviceId(): Promise<string | null> {
+    const result = await window.headspace.spDevices();
+    if (!Array.isArray(result)) {
+      this.recordCommandError("devices", result.error);
+      return null;
+    }
+    if (!result.length) {
+      this.deviceId = null;
+      this.deviceName = null;
+      this.deviceType = null;
+      this.recordCommandError("devices", "no Spotify devices returned");
+      return null;
+    }
     const active = result.find((d) => d.is_active && !d.is_restricted);
     if (active) {
       this.deviceId = active.id;
+      this.deviceName = active.name;
+      this.deviceType = active.type;
       return active.id;
     }
+    this.deviceId = null;
+    this.deviceName = null;
+    this.deviceType = null;
+    this.recordCommandError("devices", "no active unrestricted Spotify device");
     return null;
+  }
+
+  /**
+   * Make sure we have a device to start a new play/queue action on. SDK mode
+   * uses the Headspace device. Connect mode requires an active Spotify device
+   * because Spotify rejects play attempts on dormant devices with a 404.
+   */
+  private async ensurePlayableDeviceId(): Promise<string | null> {
+    if (this.player && this.deviceId) return this.deviceId;
+    return this.getActiveConnectDeviceId();
   }
 
   /**
@@ -343,12 +419,12 @@ export class SpotifyController {
   private async ensureSdkIsActive(): Promise<void> {
     if (!this.player || !this.deviceId) return;
     try {
-      const state = (await window.headspace.spState()) as
-        | { device?: { id?: string } }
-        | { error: string }
-        | null;
+      const state = await window.headspace.spState();
       const activeId =
-        state && !("error" in state) ? state.device?.id : undefined;
+        state && !isErrorResult(state) ? state.device?.id : undefined;
+      if (state && isErrorResult(state)) {
+        this.recordCommandError("state", state.error);
+      }
       if (activeId === this.deviceId) {
         console.log("[spotify] SDK already active");
         return;
@@ -364,18 +440,52 @@ export class SpotifyController {
       // eliminates the pause-fight in our testing.
       await sleep(600);
     } catch (err) {
+      this.recordCommandError("transfer", String(err));
       console.warn("[spotify] ensureSdkIsActive failed:", err);
     }
+  }
+
+  private commandError(result: unknown): string | null {
+    if (result && typeof result === "object" && "error" in result) {
+      return String((result as { error: unknown }).error);
+    }
+    return null;
+  }
+
+  private recordCommandOk(command: string): void {
+    this.lastCommand = command;
+    this.lastCommandAt = Date.now();
+    this.lastCommandError = null;
+  }
+
+  private recordCommandError(command: string, error: string): void {
+    this.lastCommand = command;
+    this.lastCommandAt = Date.now();
+    this.lastCommandError = error;
+    console.warn(`[spotify] ${command} failed:`, error);
+  }
+
+  private recordResult(command: string, result: unknown): PlaybackCommandResult {
+    const error = this.commandError(result);
+    if (error) {
+      this.recordCommandError(command, error);
+      return { ok: false, error };
+    }
+    this.recordCommandOk(command);
+    return { ok: true };
   }
 
   async playTrack(
     uri: string,
     contextUri?: string,
-  ): Promise<{ ok: true } | { ok: false; error: string }> {
-    const deviceId = await this.ensureDeviceId();
-    if (!deviceId) return { ok: false, error: "no_device" };
+  ): Promise<PlaybackCommandResult> {
+    const deviceId = await this.ensurePlayableDeviceId();
+    if (!deviceId) {
+      this.recordCommandError("play", "no_device");
+      return { ok: false, error: "no_device" };
+    }
     await this.ensureSdkIsActive();
-    const opts: Record<string, unknown> = { deviceId };
+    const opts: SpotifyPlayOpts = { deviceId };
     if (contextUri) {
       opts.contextUri = contextUri;
       opts.offsetUri = uri;
@@ -384,71 +494,200 @@ export class SpotifyController {
     }
     console.log("[spotify] playTrack ->", opts);
     const r = await window.headspace.spPlay(opts);
-    if (r && typeof r === "object" && "error" in (r as object)) {
-      return { ok: false, error: (r as { error: string }).error };
-    }
-    return { ok: true };
+    return this.recordResult("play", r);
   }
 
   async playContext(
     contextUri: string,
-  ): Promise<{ ok: true } | { ok: false; error: string }> {
-    const deviceId = await this.ensureDeviceId();
-    if (!deviceId) return { ok: false, error: "no_device" };
+  ): Promise<PlaybackCommandResult> {
+    const deviceId = await this.ensurePlayableDeviceId();
+    if (!deviceId) {
+      this.recordCommandError("play", "no_device");
+      return { ok: false, error: "no_device" };
+    }
     await this.ensureSdkIsActive();
     console.log("[spotify] playContext ->", { deviceId, contextUri });
     const r = await window.headspace.spPlay({ deviceId, contextUri });
-    if (r && typeof r === "object" && "error" in (r as object)) {
-      return { ok: false, error: (r as { error: string }).error };
+    return this.recordResult("play", r);
+  }
+
+  async play() {
+    try {
+      if (this.player) {
+        await this.player.resume();
+        this.recordCommandOk("play");
+        return;
+      }
+      const deviceId = await this.getActiveConnectDeviceId();
+      const result = await window.headspace.spPlay({ deviceId: deviceId ?? undefined });
+      this.recordResult("play", result);
+    } catch (err) {
+      this.recordCommandError("play", String(err));
     }
-    return { ok: true };
+  }
+
+  async pause() {
+    try {
+      if (this.player) {
+        await this.player.pause();
+        this.recordCommandOk("pause");
+        return;
+      }
+      const deviceId = await this.getActiveConnectDeviceId();
+      const result = await window.headspace.spPause(deviceId ?? undefined);
+      this.recordResult("pause", result);
+    } catch (err) {
+      this.recordCommandError("pause", String(err));
+    }
   }
 
   async togglePlay() {
-    if (this.player) {
-      await this.player.togglePlay();
-      return;
-    }
-    if (this.lastState.isPlaying) {
-      await window.headspace.spPause(this.deviceId ?? undefined);
-    } else {
-      await window.headspace.spPlay({ deviceId: this.deviceId ?? undefined });
-    }
+    if (this.lastState.isPlaying) await this.pause();
+    else await this.play();
   }
 
   async next() {
-    if (this.player) return this.player.nextTrack();
-    await window.headspace.spNext(this.deviceId ?? undefined);
+    try {
+      if (this.player) {
+        await this.player.nextTrack();
+        this.recordCommandOk("next");
+        return;
+      }
+      const deviceId = await this.getActiveConnectDeviceId();
+      const result = await window.headspace.spNext(deviceId ?? undefined);
+      this.recordResult("next", result);
+    } catch (err) {
+      this.recordCommandError("next", String(err));
+    }
   }
 
   async previous() {
-    if (this.player) return this.player.previousTrack();
-    await window.headspace.spPrevious(this.deviceId ?? undefined);
+    try {
+      if (this.player) {
+        await this.player.previousTrack();
+        this.recordCommandOk("previous");
+        return;
+      }
+      const deviceId = await this.getActiveConnectDeviceId();
+      const result = await window.headspace.spPrevious(deviceId ?? undefined);
+      this.recordResult("previous", result);
+    } catch (err) {
+      this.recordCommandError("previous", String(err));
+    }
   }
 
   async seek(positionMs: number) {
-    if (this.player) return this.player.seek(positionMs);
-    await window.headspace.spSeek(positionMs, this.deviceId ?? undefined);
+    try {
+      if (this.player) {
+        await this.player.seek(positionMs);
+        this.recordCommandOk("seek");
+        return;
+      }
+      const deviceId = await this.getActiveConnectDeviceId();
+      const result = await window.headspace.spSeek(positionMs, deviceId ?? undefined);
+      this.recordResult("seek", result);
+    } catch (err) {
+      this.recordCommandError("seek", String(err));
+    }
   }
 
   async setVolume(volume0to1: number) {
-    if (this.player) return this.player.setVolume(volume0to1);
-    await window.headspace.spSetVolume(
-      Math.round(volume0to1 * 100),
-      this.deviceId ?? undefined,
-    );
+    try {
+      if (this.player) {
+        await this.player.setVolume(volume0to1);
+        this.recordCommandOk("volume");
+        return;
+      }
+      const deviceId = await this.getActiveConnectDeviceId();
+      const result = await window.headspace.spSetVolume(
+        Math.round(volume0to1 * 100),
+        deviceId ?? undefined,
+      );
+      this.recordResult("volume", result);
+    } catch (err) {
+      this.recordCommandError("volume", String(err));
+    }
   }
 
-  async addToQueue(uri: string): Promise<{ ok: true } | { ok: false; error: string }> {
-    const deviceId = await this.ensureDeviceId();
-    if (!deviceId) return { ok: false, error: "no_device" };
+  isLiked(): boolean {
+    return this.liked;
+  }
+
+  async refreshLiked(trackId?: string): Promise<boolean> {
+    const id = trackId ?? this.lastState.track?.id;
+    if (!id) {
+      this.liked = false;
+      this.likedTrackId = null;
+      return false;
+    }
+    const res = await window.headspace.spLikedContains([id]);
+    if (isErrorResult(res)) {
+      this.liked = false;
+      this.likedTrackId = id;
+      return false;
+    }
+    this.liked = !!res[0];
+    this.likedTrackId = id;
+    this.emit();
+    return this.liked;
+  }
+
+  async toggleLike(): Promise<PlaybackCommandResult> {
+    const id = this.lastState.track?.id;
+    if (!id) return { ok: false, error: "no_track" };
+    if (this.likedTrackId !== id) await this.refreshLiked(id);
+    const next = !this.liked;
+    const r = next
+      ? await window.headspace.spSaveTracks([id])
+      : await window.headspace.spUnsaveTracks([id]);
+    const result = this.recordResult(next ? "like" : "unlike", r);
+    if (result.ok) {
+      this.liked = next;
+      this.likedTrackId = id;
+      this.emit();
+    }
+    return result;
+  }
+
+  async setShuffle(on: boolean): Promise<PlaybackCommandResult> {
+    const deviceId = await this.ensurePlayableDeviceId();
+    const r = await window.headspace.spShuffle(on, deviceId ?? undefined);
+    const result = this.recordResult("shuffle", r);
+    if (result.ok) {
+      this.lastState = { ...this.lastState, shuffle: on };
+      this.emit();
+    }
+    return result;
+  }
+
+  async cycleRepeat(): Promise<PlaybackCommandResult> {
+    const order: RepeatState[] = ["off", "context", "track"];
+    const next = order[(order.indexOf(this.lastState.repeat) + 1) % order.length];
+    const deviceId = await this.ensurePlayableDeviceId();
+    const r = await window.headspace.spRepeat(next, deviceId ?? undefined);
+    const result = this.recordResult("repeat", r);
+    if (result.ok) {
+      this.lastState = { ...this.lastState, repeat: next };
+      this.emit();
+    }
+    return result;
+  }
+
+  async transferTo(deviceId: string, play = true): Promise<PlaybackCommandResult> {
+    const r = await window.headspace.spTransfer(deviceId, play);
+    return this.recordResult("transfer", r);
+  }
+
+  async addToQueue(uri: string): Promise<PlaybackCommandResult> {
+    const deviceId = await this.ensurePlayableDeviceId();
+    if (!deviceId) {
+      this.recordCommandError("queue", "no_device");
+      return { ok: false, error: "no_device" };
+    }
     await this.ensureSdkIsActive();
     console.log("[spotify] addToQueue ->", { deviceId, uri });
     const r = await window.headspace.spAddQueue(uri, deviceId);
-    if (r && typeof r === "object" && "error" in (r as object)) {
-      return { ok: false, error: (r as { error: string }).error };
-    }
-    return { ok: true };
+    return this.recordResult("queue", r);
   }
 }
 

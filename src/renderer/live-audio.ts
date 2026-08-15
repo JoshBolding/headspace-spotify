@@ -20,12 +20,19 @@
 
 export type LiveAudioSource = "tap" | "loopback";
 
+// Drop-detector tuning. A drop fires when the live loudness envelope surges
+// this far above its slow baseline while genuinely loud. Surfaced on the HUD
+// (SURGE meter) so these can be dialed against real tracks.
+const DROP_SURGE_THRESHOLD = 0.1;
+const DROP_ENERGY_MIN = 0.16;
+
 export class LiveAudio {
   private ctx: AudioContext | null = null;
   private analyser: AnalyserNode | null = null;
   private panner: StereoPannerNode | null = null;
   private freq: Uint8Array | null = null;
   private src: LiveAudioSource | null = null;
+  private tracks: MediaStreamTrack[] = [];
 
   // Spectral-flux onset detector state. Flux = sum of positive bin-deltas
   // between consecutive frames — a much tighter onset signal than raw energy.
@@ -34,8 +41,62 @@ export class LiveAudio {
   private lastFluxBeatAt = 0;
   private lastFluxOnsetAt = 0;
 
+  // Per-frame result cache. The visualizer and FaceAlive each run their own
+  // rAF loop and both consume checkBeat/checkOnset; without this guard the
+  // second caller would push a near-zero flux delta into the history every
+  // frame and halve the detector's sensitivity. Calls within the same ~frame
+  // window share one flux update and see the same beat/onset answer.
+  private frameAt = -Infinity;
+  private frameBeat = false;
+  private frameOnset = false;
+  private frameDrop = false;
+
+  // Drop detector state. A drop is a sharp jump of the live loudness envelope
+  // (energyEnv) above a slow-moving baseline (energySlow). The gap between
+  // them is the "surge"; a rising-edge surge past a threshold = a drop.
+  private energyEnv = 0;
+  private energySlow = 0;
+  private prevSurge = 0;
+  private lastSurge = 0;
+  private lastDropAt = 0;
+
   getSource(): LiveAudioSource | null {
     return this.src;
+  }
+
+  stop(): void {
+    this.tracks.forEach((track) => track.stop());
+    this.tracks = [];
+    if (this.ctx) void this.ctx.close().catch(() => undefined);
+    this.ctx = null;
+    this.analyser = null;
+    this.panner = null;
+    this.freq = null;
+    this.src = null;
+    this.prevSpectrum = null;
+    this.fluxHistory = [];
+    this.lastFluxBeatAt = 0;
+    this.lastFluxOnsetAt = 0;
+    this.frameAt = -Infinity;
+    this.frameBeat = false;
+    this.frameOnset = false;
+    this.frameDrop = false;
+    this.energyEnv = 0;
+    this.energySlow = 0;
+    this.prevSurge = 0;
+    this.lastSurge = 0;
+    this.lastDropAt = 0;
+  }
+
+  /**
+   * Audio graph access for consumers that need to attach their own analysis
+   * (butterchurn renders from a node, not from our byte snapshots). The
+   * analyser is a pass-through node, so connecting downstream of it is safe
+   * for both the tap path (it already feeds the panner) and loopback.
+   */
+  getAudioGraph(): { ctx: AudioContext; node: AudioNode } | null {
+    if (!this.ctx || !this.analyser) return null;
+    return { ctx: this.ctx, node: this.analyser };
   }
 
   /**
@@ -61,6 +122,7 @@ export class LiveAudio {
   async tryTap(): Promise<boolean> {
     const audioEl = document.querySelector("audio") as HTMLAudioElement | null;
     if (!audioEl) return false;
+    this.stop();
     let ctx: AudioContext | null = null;
     try {
       ctx = new AudioContext();
@@ -113,6 +175,7 @@ export class LiveAudio {
   async tryLoopback(): Promise<boolean> {
     let stream: MediaStream | null = null;
     try {
+      this.stop();
       const sourceId = await window.headspace.getLoopbackSourceId();
       if (!sourceId) {
         console.warn("[live-audio] no screen source available for loopback");
@@ -143,6 +206,7 @@ export class LiveAudio {
         stream.getTracks().forEach((t) => t.stop());
         return false;
       }
+      this.tracks = audioTracks;
       const ctx = new AudioContext();
       const audioOnlyStream = new MediaStream(audioTracks);
       const source = ctx.createMediaStreamSource(audioOnlyStream);
@@ -201,13 +265,32 @@ export class LiveAudio {
   }
 
   /**
-   * Spectral-flux beat detector with adaptive threshold. Fires on percussive
-   * onsets — kicks, snares, plucks. Refractory 130ms.
+   * Run the per-frame analysis exactly once per render frame, no matter how
+   * many consumers ask. Computes flux, beat, onset, and drop flags.
    */
-  checkBeat(): boolean {
-    if (!this.freq) return false;
+  private ensureFrame(): void {
+    const now = performance.now();
+    if (now - this.frameAt < 4) return; // same frame — reuse cached flags
+    this.frameAt = now;
+    this.frameBeat = false;
+    this.frameOnset = false;
+    this.frameDrop = false;
+    if (!this.freq) return;
+
     const flux = this.updateFlux();
-    if (this.fluxHistory.length < 12) return false;
+
+    // Broadband energy envelope for the drop detector (cheap mean of the
+    // lower 60% of bins — same usable range the visualizer reads).
+    const usable = Math.floor(this.freq.length * 0.6);
+    let sum = 0;
+    for (let i = 0; i < usable; i++) sum += this.freq[i];
+    const energy = sum / usable / 255;
+    // Fast envelope (snappy attack) and a slow baseline. The gap is the surge.
+    this.energyEnv += (energy - this.energyEnv) * (energy > this.energyEnv ? 0.45 : 0.08);
+    this.energySlow += (energy - this.energySlow) * 0.02;
+    this.lastSurge = Math.max(0, this.energyEnv - this.energySlow);
+
+    if (this.fluxHistory.length < 12) return;
     let avg = 0;
     let max = 0;
     for (const v of this.fluxHistory) {
@@ -215,7 +298,7 @@ export class LiveAudio {
       if (v > max) max = v;
     }
     avg /= this.fluxHistory.length;
-    const now = performance.now();
+
     // Beat: flux > avg * 1.55 AND > 30% of recent peak. The peak factor
     // suppresses spurious fires during quiet sections where avg drops low.
     if (
@@ -225,31 +308,62 @@ export class LiveAudio {
       now - this.lastFluxBeatAt > 130
     ) {
       this.lastFluxBeatAt = now;
-      return true;
+      this.frameBeat = true;
     }
-    return false;
+
+    // Onset: lower threshold, shorter refractory — catches hi-hats, vocal
+    // consonants, plucks between detected beats.
+    if (flux > avg * 1.22 && flux > 18 && now - this.lastFluxOnsetAt > 70) {
+      this.lastFluxOnsetAt = now;
+      this.frameOnset = true;
+    }
+
+    // Drop: the live envelope surges past its slow baseline (a breakdown→slam
+    // jump), detected on the rising edge so it fires once. Energy must be
+    // genuinely loud now, and the surge must clear the threshold. 4s refractory.
+    const surge = this.lastSurge;
+    if (
+      now - this.lastDropAt > 4000 &&
+      this.energyEnv > DROP_ENERGY_MIN &&
+      surge > DROP_SURGE_THRESHOLD &&
+      this.prevSurge <= DROP_SURGE_THRESHOLD
+    ) {
+      this.lastDropAt = now;
+      this.frameDrop = true;
+    }
+    this.prevSurge = surge;
+  }
+
+  /** Live drop-detector metrics for the diagnostic HUD. */
+  getDropMetrics(): { surge: number; threshold: number; energy: number } {
+    return { surge: this.lastSurge, threshold: DROP_SURGE_THRESHOLD, energy: this.energyEnv };
   }
 
   /**
-   * Looser flux-based onset detector. Same flux signal but a lower threshold
-   * and shorter refractory — catches hi-hats, vocal consonants, plucks
-   * between detected beats.
+   * Spectral-flux beat detector with adaptive threshold. Fires on percussive
+   * onsets — kicks, snares, plucks. Refractory 130ms. Frame-cached: all
+   * consumers in the same frame see the same answer.
    */
-  checkOnset(): boolean {
-    if (!this.freq) return false;
-    if (this.fluxHistory.length < 8) return false;
-    const flux = this.fluxHistory[this.fluxHistory.length - 1];
-    let avg = 0;
-    for (const v of this.fluxHistory) avg += v;
-    avg /= this.fluxHistory.length;
-    const now = performance.now();
-    if (flux > avg * 1.22 && flux > 18 && now - this.lastFluxOnsetAt > 70) {
-      this.lastFluxOnsetAt = now;
-      return true;
-    }
-    return false;
+  checkBeat(): boolean {
+    this.ensureFrame();
+    return this.frameBeat;
   }
 
+  /** Looser flux-based onset detector (frame-cached, see checkBeat). */
+  checkOnset(): boolean {
+    this.ensureFrame();
+    return this.frameOnset;
+  }
+
+  /**
+   * "The drop" detector: a hard percussive hit arriving right after a
+   * markedly quieter stretch. Fires rarely (8s refractory) — meant for
+   * one-shot theatrical reactions, not steady-state animation.
+   */
+  checkDrop(): boolean {
+    this.ensureFrame();
+    return this.frameDrop;
+  }
 }
 
 function sleep(ms: number): Promise<void> {
