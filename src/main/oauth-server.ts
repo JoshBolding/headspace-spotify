@@ -13,10 +13,10 @@ export interface CallbackResult {
   error?: string;
 }
 
-export function startCallbackServer(opts: {
+export async function startCallbackServer(opts: {
   port: number;
   onResult: (result: CallbackResult) => void;
-}): http.Server {
+}): Promise<http.Server> {
   const server = http.createServer((req, res) => {
     if (!req.url) {
       res.writeHead(400);
@@ -53,8 +53,39 @@ export function startCallbackServer(opts: {
       }
     }, 500);
   });
-  server.listen(opts.port, "127.0.0.1");
+  await new Promise<void>((resolve, reject) => {
+    const onError = (err: Error) => {
+      server.close();
+      reject(err);
+    };
+    server.once("error", onError);
+    server.listen(opts.port, "127.0.0.1", () => {
+      server.removeListener("error", onError);
+      resolve();
+    });
+  });
   return server;
+}
+
+export async function startCallbackServerWithFallback(opts: {
+  ports: readonly number[];
+  onResult: (result: CallbackResult) => void;
+}): Promise<{ server: http.Server; port: number }> {
+  let lastErr: NodeJS.ErrnoException | undefined;
+  for (const port of opts.ports) {
+    try {
+      const server = await startCallbackServer({ port, onResult: opts.onResult });
+      return { server, port };
+    } catch (err) {
+      const e = err as NodeJS.ErrnoException;
+      if (e.code === "EADDRINUSE") {
+        lastErr = e;
+        continue;
+      }
+      throw err;
+    }
+  }
+  throw lastErr ?? Object.assign(new Error("oauth_port_unavailable"), { code: "EADDRINUSE" });
 }
 
 function htmlPage(title: string, body: string): string {

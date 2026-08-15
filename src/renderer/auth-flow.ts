@@ -27,8 +27,10 @@ export function wireSpotifyAuth(onAuthed: () => void): void {
       btn.disabled = false;
       btn.textContent = "Sign in";
       status.textContent =
-        result.error === "timeout"
-          ? "Sign-in timed out. Try again."
+        result.error === "timeout" || result.error?.startsWith("timeout")
+          ? `Sign-in timed out. Try again.${
+              result.error && result.error !== "timeout" ? ` ${result.error.slice("timeout".length)}` : ""
+            }`
           : `Sign-in failed: ${result.error ?? "unknown error"}`;
     }
   });

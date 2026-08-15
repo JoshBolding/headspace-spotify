@@ -28,7 +28,12 @@ const { components } = require("electron") as {
 const DEBUG_BOOT_LOGS = process.env.HEADSPACE_DEBUG_BOOT === "1";
 import { join } from "path";
 
-import { loadConfig, REDIRECT_PORT } from "./spotify-config";
+import {
+  loadConfig,
+  OAUTH_FALLBACK_PORTS,
+  REDIRECT_PORT,
+  redirectUriForPort,
+} from "./spotify-config";
 import {
   buildAuthorizeUrl,
   exchangeCode,
@@ -37,7 +42,7 @@ import {
   generateState,
   refreshAccessToken,
 } from "./auth-pkce";
-import { startCallbackServer } from "./oauth-server";
+import { startCallbackServerWithFallback } from "./oauth-server";
 import {
   clearTokens,
   loadTokens,
@@ -170,33 +175,46 @@ function createWindow() {
   });
 
   // === Spotify auth ============================================
+  /** Coalesce concurrent refreshes so parallel API calls don't double-refresh. */
+  let refreshInFlight: Promise<string | null> | null = null;
+
   /** Returns a valid access token, refreshing if near or past expiry. */
-  async function getValidAccessToken(): Promise<string | null> {
+  async function getValidAccessToken(opts?: {
+    forceRefresh?: boolean;
+  }): Promise<string | null> {
     const tokens = await loadTokens();
     if (!tokens) return null;
-    // Refresh if within 60s of expiry to avoid race during first API call.
-    if (Date.now() < tokens.expiresAt - 60_000) return tokens.accessToken;
-    try {
-      const config = loadConfig();
-      const fresh = await refreshAccessToken({
-        clientId: config.clientId,
-        refreshToken: tokens.refreshToken,
-      });
-      const updated: StoredTokens = {
-        accessToken: fresh.access_token,
-        // Spotify may or may not rotate the refresh token; keep old if absent.
-        refreshToken: fresh.refresh_token ?? tokens.refreshToken,
-        expiresAt: Date.now() + fresh.expires_in * 1000,
-        scope: fresh.scope,
-      };
-      await saveTokens(updated);
-      return updated.accessToken;
-    } catch {
-      // Refresh failed — likely revoked. Clear and require re-auth.
-      await clearTokens();
-      win?.webContents.send("auth:changed", { authenticated: false });
-      return null;
+    // Refresh if forced (401 retry) or within 60s of expiry.
+    if (!opts?.forceRefresh && Date.now() < tokens.expiresAt - 60_000) {
+      return tokens.accessToken;
     }
+    if (refreshInFlight) return refreshInFlight;
+    refreshInFlight = (async () => {
+      try {
+        const config = loadConfig();
+        const fresh = await refreshAccessToken({
+          clientId: config.clientId,
+          refreshToken: tokens.refreshToken,
+        });
+        const updated: StoredTokens = {
+          accessToken: fresh.access_token,
+          // Spotify may or may not rotate the refresh token; keep old if absent.
+          refreshToken: fresh.refresh_token ?? tokens.refreshToken,
+          expiresAt: Date.now() + fresh.expires_in * 1000,
+          scope: fresh.scope,
+        };
+        await saveTokens(updated);
+        return updated.accessToken;
+      } catch {
+        // Refresh failed — likely revoked. Clear and require re-auth.
+        await clearTokens();
+        win?.webContents.send("auth:changed", { authenticated: false });
+        return null;
+      } finally {
+        refreshInFlight = null;
+      }
+    })();
+    return refreshInFlight;
   }
 
   ipcMain.handle("auth:status", async () => {
@@ -314,53 +332,83 @@ function createWindow() {
         resolve(result);
       };
 
-      const server = startCallbackServer({
-        port: REDIRECT_PORT,
-        onResult: async (cb) => {
-          if (cb.error) return finish({ success: false, error: cb.error });
-          if (cb.state !== state)
-            return finish({ success: false, error: "state_mismatch" });
-          if (!cb.code) return finish({ success: false, error: "missing_code" });
-          try {
-            const tokens = await exchangeCode({
-              clientId: config.clientId,
-              code: cb.code,
-              codeVerifier: verifier,
-              redirectUri: config.redirectUri,
-            });
-            await saveTokens({
-              accessToken: tokens.access_token,
-              refreshToken: tokens.refresh_token ?? "",
-              expiresAt: Date.now() + tokens.expires_in * 1000,
-              scope: tokens.scope,
-            });
-            win?.webContents.send("auth:changed", { authenticated: true });
-            finish({ success: true });
-          } catch (err) {
-            finish({ success: false, error: (err as Error).message });
-          }
-        },
-      });
-
-      const authorizeUrl = buildAuthorizeUrl({
-        clientId: config.clientId,
-        redirectUri: config.redirectUri,
-        codeChallenge: challenge,
-        scopes: config.scopes,
-        state,
-        showDialog: opts?.showDialog,
-      });
-      void shell.openExternal(authorizeUrl);
-
-      // Hard timeout: if the user abandons the browser tab, don't leak the server.
-      setTimeout(() => {
+      void (async () => {
+        let server: { close: () => void };
+        let port = REDIRECT_PORT;
         try {
-          server.close();
-        } catch {
-          /* ignore */
+          const started = await startCallbackServerWithFallback({
+            ports: OAUTH_FALLBACK_PORTS,
+            onResult: async (cb) => {
+              const portHint =
+                port !== REDIRECT_PORT
+                  ? ` Callback was ${redirectUriForPort(port)} — register this Redirect URI in the Spotify dashboard if 8888 was taken.`
+                  : "";
+              if (cb.error) return finish({ success: false, error: cb.error + portHint });
+              if (cb.state !== state)
+                return finish({ success: false, error: "state_mismatch" + portHint });
+              if (!cb.code)
+                return finish({ success: false, error: "missing_code" + portHint });
+              try {
+                const tokens = await exchangeCode({
+                  clientId: config.clientId,
+                  code: cb.code,
+                  codeVerifier: verifier,
+                  redirectUri: redirectUriForPort(port),
+                });
+                await saveTokens({
+                  accessToken: tokens.access_token,
+                  refreshToken: tokens.refresh_token ?? "",
+                  expiresAt: Date.now() + tokens.expires_in * 1000,
+                  scope: tokens.scope,
+                });
+                win?.webContents.send("auth:changed", { authenticated: true });
+                finish({ success: true });
+              } catch (err) {
+                finish({
+                  success: false,
+                  error: (err as Error).message + portHint,
+                });
+              }
+            },
+          });
+          server = started.server;
+          port = started.port;
+        } catch (err) {
+          const e = err as NodeJS.ErrnoException;
+          if (e.code === "EADDRINUSE") {
+            return finish({
+              success: false,
+              error:
+                "Could not bind OAuth callback on ports 8888–8893 (all in use). Close the other listener, or register one of those ports as a Redirect URI.",
+            });
+          }
+          return finish({ success: false, error: (err as Error).message });
         }
-        finish({ success: false, error: "timeout" });
-      }, 5 * 60 * 1000);
+
+        const redirectUri = redirectUriForPort(port);
+        const authorizeUrl = buildAuthorizeUrl({
+          clientId: config.clientId,
+          redirectUri,
+          codeChallenge: challenge,
+          scopes: config.scopes,
+          state,
+          showDialog: opts?.showDialog,
+        });
+        void shell.openExternal(authorizeUrl);
+
+        setTimeout(() => {
+          try {
+            server.close();
+          } catch {
+            /* ignore */
+          }
+          const portHint =
+            port !== REDIRECT_PORT
+              ? ` Callback was ${redirectUri}.`
+              : "";
+          finish({ success: false, error: "timeout" + portHint });
+        }, 5 * 60 * 1000);
+      })();
     });
   });
 

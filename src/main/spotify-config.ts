@@ -9,7 +9,12 @@ import fs from "node:fs";
 import path from "node:path";
 
 export const REDIRECT_PORT = 8888;
+export const OAUTH_FALLBACK_PORTS = [8888, 8889, 8890, 8891, 8892, 8893] as const;
 export const REDIRECT_URI = `http://127.0.0.1:${REDIRECT_PORT}/callback`;
+
+export function redirectUriForPort(port: number): string {
+  return `http://127.0.0.1:${port}/callback`;
+}
 
 export const SPOTIFY_SCOPES = [
   "streaming",

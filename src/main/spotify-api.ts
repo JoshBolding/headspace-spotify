@@ -37,7 +37,7 @@ export type {
 
 const BASE = "https://api.spotify.com/v1";
 
-type GetTokenFn = () => Promise<string | null>;
+type GetTokenFn = (opts?: { forceRefresh?: boolean }) => Promise<string | null>;
 
 let getToken: GetTokenFn = async () => null;
 
@@ -45,29 +45,67 @@ export function configureSpotifyApi(fn: GetTokenFn) {
   getToken = fn;
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+/** Retry-After seconds, or an HTTP-date, or exponential backoff if absent. */
+function retryAfterMs(res: Response, attempt: number): number {
+  const raw = res.headers.get("retry-after");
+  if (raw) {
+    const seconds = Number(raw);
+    if (Number.isFinite(seconds) && seconds >= 0) return seconds * 1000;
+    const when = Date.parse(raw);
+    if (Number.isFinite(when)) return Math.max(0, when - Date.now());
+  }
+  return 500 * 2 ** (attempt - 1);
+}
+
 async function call<T>(
   pathOrUrl: string,
   init: RequestInit = {},
   expectJson = true,
 ): Promise<T> {
-  const token = await getToken();
+  let token = await getToken();
   if (!token) throw new Error("not_authenticated");
   const url = pathOrUrl.startsWith("http") ? pathOrUrl : `${BASE}${pathOrUrl}`;
-  const res = await fetch(url, {
-    ...init,
-    headers: {
-      Authorization: `Bearer ${token}`,
-      ...(init.body ? { "Content-Type": "application/json" } : {}),
-      ...(init.headers || {}),
-    },
-  });
-  if (res.status === 204) return undefined as T;
-  if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new Error(`Spotify ${res.status}: ${text || res.statusText}`);
+  const MAX_ATTEMPTS = 3;
+  let did401Retry = false;
+
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    const res = await fetch(url, {
+      ...init,
+      headers: {
+        Authorization: `Bearer ${token}`,
+        ...(init.body ? { "Content-Type": "application/json" } : {}),
+        ...(init.headers || {}),
+      },
+    });
+
+    if (res.status === 401 && !did401Retry) {
+      did401Retry = true;
+      const fresh = await getToken({ forceRefresh: true });
+      if (fresh) {
+        token = fresh;
+        continue;
+      }
+    }
+
+    if (res.status === 429 && attempt < MAX_ATTEMPTS) {
+      await sleep(retryAfterMs(res, attempt));
+      continue;
+    }
+
+    if (res.status === 204) return undefined as T;
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new Error(`Spotify ${res.status}: ${text || res.statusText}`);
+    }
+    if (!expectJson) return undefined as T;
+    return res.json() as Promise<T>;
   }
-  if (!expectJson) return undefined as T;
-  return res.json() as Promise<T>;
+
+  throw new Error("Spotify request failed after retries");
 }
 
 interface Paged<T> {
