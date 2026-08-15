@@ -74,6 +74,7 @@ function createWindow() {
     resizable: false,
     hasShadow: false,
     alwaysOnTop: true,
+    skipTaskbar: false,
     backgroundColor: "#00000000",
     webPreferences: {
       preload: join(__dirname, "preload.js"),
@@ -82,6 +83,17 @@ function createWindow() {
       sandbox: true,
     },
   });
+
+  // Transparent always-on-top windows can spawn on a dead monitor. Park it
+  // on the primary display so the user can actually find the head.
+  const primary = screen.getPrimaryDisplay().workArea;
+  win.setPosition(
+    Math.round(primary.x + (primary.width - VIEW_W_CLOSED) / 2),
+    Math.round(primary.y + (primary.height - VIEW_H) / 2),
+  );
+  win.show();
+  win.focus();
+  win.moveTop();
 
   // Load: dev server when running with vite, otherwise built renderer.
   // DevTools opens automatically only in dev (when HEADSPACE_DEV_URL is set);
@@ -105,7 +117,15 @@ function createWindow() {
   ipcMain.on("hit-test", (_evt, isOverOpaque: boolean) => {
     if (!win) return;
     if (isDragging) return;
-    win.setIgnoreMouseEvents(!isOverOpaque, { forward: true });
+    // Never click-through the whole window on first paint — that combination
+    // of transparent + ignore-mouse has been making the head vanish after
+    // 2–3s on this machine. Only punch through when we know the cursor is
+    // off the opaque skin.
+    try {
+      win.setIgnoreMouseEvents(!isOverOpaque, { forward: true });
+    } catch {
+      /* ignore */
+    }
   });
 
   ipcMain.on("window:minimize", () => win?.minimize());
@@ -430,19 +450,22 @@ function createWindow() {
     return true;
   });
 
-  win.on("close", (e) => {
-    // Skin X / Esc hide to the tray so media keys keep working. Tests and
-    // an explicit Quit still tear the process down.
-    if (process.env.HEADSPACE_FACE_TEST === "1" || allowQuit) return;
-    e.preventDefault();
-    win?.hide();
-  });
-
   win.on("closed", () => {
     win = null;
   });
 
-  setupTrayAndHotkeys();
+  win.webContents.on("render-process-gone", (_e, details) => {
+    console.error("[headspace] renderer gone:", details.reason, details.exitCode);
+  });
+  win.webContents.on("did-fail-load", (_e, code, desc) => {
+    console.error("[headspace] load failed:", code, desc);
+  });
+
+  try {
+    setupTrayAndHotkeys();
+  } catch (err) {
+    console.warn("[headspace] tray/hotkeys skipped:", err);
+  }
 }
 
 let allowQuit = false;
@@ -474,8 +497,13 @@ function setupTrayAndHotkeys(): void {
     join(process.resourcesPath ?? "", "head.png"),
     join(app.getAppPath(), "assets", "converted", "head.png"),
   ].find((p) => existsSync(p)) ?? join(app.getAppPath(), "assets", "converted", "head.png");
-  const icon = nativeImage.createFromPath(iconPath);
-  tray = new Tray(icon.isEmpty() ? nativeImage.createEmpty() : icon.resize({ width: 16, height: 16 }));
+  let image = nativeImage.createFromPath(iconPath);
+  if (image.isEmpty()) {
+    console.warn("[headspace] tray icon missing, skipping tray");
+    return;
+  }
+  image = image.resize({ width: 16, height: 16 });
+  tray = new Tray(image);
   tray.setToolTip("Headspace");
   tray.setContextMenu(
     Menu.buildFromTemplate([
