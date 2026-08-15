@@ -1,147 +1,40 @@
 /**
  * Spotify-edition renderer entry.
  *
- * Wires alpha hit-test, drag, transport, library browser, and the Spotify
- * controller (Web Playback SDK with Connect-mode fallback). The skin chrome
- * is unchanged from v1; the audio engine and library are entirely new.
+ * Thin bootstrap: hit-test, skin chrome, Spotify controller, and the
+ * feature modules that used to live in this file. Behavior is unchanged;
+ * the split is so the next person doesn't have to scroll 1400 lines to
+ * find the lyrics toggle.
  */
 
-import { Visualizer, buildSyntheticAnalysis, type VisMode } from "./visualizer";
+import { Visualizer } from "./visualizer";
 import { ButterchurnViz } from "./butterchurn-viz";
 import { AudioHud } from "./audio-hud";
 import { SkinState } from "./skin-state";
 import { Transport } from "./transport";
 import { SkinSlider } from "./skin-slider";
-import {
-  SpotifyController,
-  type SpotifyControllerDiagnostics,
-  type SpotifyState,
-} from "./spotify-player";
+import { SpotifyController } from "./spotify-player";
 import { LibraryBrowser } from "./library-browser";
 import { LiveAudio } from "./live-audio";
-import { extractPalette, DEFAULT_PALETTE } from "./palette";
-import { THEMES, getTheme, applyTheme, autoThemeFromHue } from "./themes";
 import { STORAGE_KEYS } from "./storage-keys";
 import { FaceAlive, NOSE_CLICKS_REQUIRED } from "./face-alive";
-import type { AuthStatus } from "../shared/spotify-types";
-import { isErrorResult } from "../shared/spotify-types";
-import type { ComponentStatus, WidevineDiag } from "../shared/ipc-api";
 import { attachMediaSession } from "./media-session";
 import { QueueView } from "./queue-view";
+import { initHitTest } from "./hit-test";
+import { wireSpotifyAuth } from "./auth-flow";
+import { StatusOverlay } from "./status-overlay";
+import { LyricsPanel } from "./lyrics-panel";
+import { wireVisMenu } from "./vis-menu";
+import { MilkdropDriver } from "./milkdrop-driver";
+import { wireNowPlaying } from "./now-playing";
 import {
-  buildLyricsTrack,
-  findActiveLineIndex,
-  type LyricsTrack,
-} from "./lyrics";
-
-const HEAD_W = 234;
-const HEAD_H = 394;
-const HEAD_X = 261;
-const VIEW_W_CLOSED = 549;
-const MINI_SCALE = 0.5;
-const ALPHA_THRESHOLD = 16;
-
-let headMask: Uint8Array | null = null;
-
-async function buildHeadMask(): Promise<void> {
-  const img = new Image();
-  img.src = "head.png";
-  await img.decode();
-  const c = document.createElement("canvas");
-  c.width = HEAD_W;
-  c.height = HEAD_H;
-  const ctx = c.getContext("2d", { willReadFrequently: true })!;
-  ctx.drawImage(img, 0, 0, HEAD_W, HEAD_H);
-  const data = ctx.getImageData(0, 0, HEAD_W, HEAD_H).data;
-  const mask = new Uint8Array(HEAD_W * HEAD_H);
-  for (let i = 0; i < mask.length; i++) {
-    mask[i] = data[i * 4 + 3] >= ALPHA_THRESHOLD ? 1 : 0;
-  }
-  headMask = mask;
-  drawDebugMask(mask);
-}
-
-function drawDebugMask(mask: Uint8Array): void {
-  const canvas = document.getElementById("debug-mask") as HTMLCanvasElement;
-  canvas.width = HEAD_W;
-  canvas.height = HEAD_H;
-  const ctx = canvas.getContext("2d")!;
-  const imageData = ctx.createImageData(HEAD_W, HEAD_H);
-  for (let i = 0; i < mask.length; i++) {
-    if (mask[i]) {
-      imageData.data[i * 4 + 0] = 255;
-      imageData.data[i * 4 + 2] = 255;
-      imageData.data[i * 4 + 3] = 255;
-    }
-  }
-  ctx.putImageData(imageData, 0, 0);
-}
-
-function isHeadPixel(x: number, y: number): boolean {
-  if (!headMask) return false;
-  const scale = document.body.classList.contains("mini") ? MINI_SCALE : 1;
-  const hx = Math.floor(x / scale - HEAD_X);
-  const hy = Math.floor(y / scale);
-  if (hx < 0 || hy < 0 || hx >= HEAD_W || hy >= HEAD_H) return false;
-  return headMask[hy * HEAD_W + hx] === 1;
-}
-
-function isOpaqueAt(x: number, y: number): boolean {
-  const els = document.elementsFromPoint(x, y);
-  for (const el of els) {
-    if (!(el instanceof HTMLElement)) continue;
-    if (el.dataset.opaque === "1") return true;
-    if (el.classList.contains("hotzone")) return true;
-    if (el.classList.contains("ear-handle")) return true;
-    if (el.classList.contains("drawer-body")) return true;
-    if (el.closest(".drawer-body")) return true;
-    if (el.id === "transport" || el.id === "seek-track") return true;
-    if (el.classList.contains("ear-img")) return true;
-  }
-  return isHeadPixel(x, y);
-}
-
-function wireHitTesting(): void {
-  let lastState: boolean | null = null;
-  document.addEventListener(
-    "pointermove",
-    (e) => {
-      const opaque = isOpaqueAt(e.clientX, e.clientY);
-      if (opaque !== lastState) {
-        lastState = opaque;
-        window.headspace.hitTest(opaque);
-      }
-    },
-    { passive: true },
-  );
-  document.addEventListener("pointerleave", () => {
-    if (lastState !== false) {
-      lastState = false;
-      window.headspace.hitTest(false);
-    }
-  });
-}
-
-function wireDrag(): void {
-  const drag = document.getElementById("drag");
-  if (!drag) return;
-  let dragging = false;
-  drag.addEventListener("pointerdown", (e) => {
-    if (e.button !== 0) return;
-    if (!isHeadPixel(e.clientX, e.clientY)) return;
-    e.preventDefault();
-    dragging = true;
-    window.headspace.dragStart(e.clientX, e.clientY);
-  });
-  const end = () => {
-    if (!dragging) return;
-    dragging = false;
-    window.headspace.dragEnd();
-  };
-  window.addEventListener("pointerup", end);
-  window.addEventListener("pointercancel", end);
-  window.addEventListener("blur", end);
-}
+  createSettingsRenderer,
+  renderRuntimeDiagnostics,
+  summarizeWidevineDiag,
+} from "./settings-panel";
+import { ThemeCycler } from "./theme-cycler";
+import { MiniMode } from "./mini-mode";
+import { flashVisLabel } from "./vis-label";
 
 function wireKeys(controller: SpotifyController, faceAlive?: FaceAlive): void {
   const faceAliveDebugEnabled =
@@ -171,58 +64,46 @@ function wireKeys(controller: SpotifyController, faceAlive?: FaceAlive): void {
   });
 }
 
-function wireSpotifyAuth(onAuthed: () => void): void {
-  const overlay = document.getElementById("auth-overlay")!;
-  const btn = document.getElementById("btn-spotify-signin") as HTMLButtonElement;
-  const status = document.getElementById("auth-status-text")!;
-
-  function applyStatus(s: AuthStatus) {
-    overlay.setAttribute("data-show", s.authenticated ? "0" : "1");
-    btn.disabled = false;
-    btn.textContent = "Sign in";
-    status.textContent = "";
-    if (s.authenticated) onAuthed();
-  }
-
-  btn.addEventListener("click", async () => {
-    btn.disabled = true;
-    btn.textContent = "Opening browser...";
-    status.textContent = "Complete sign-in in your browser, then return here.";
-    const result = await window.headspace.authSignIn({ showDialog: true });
-    if (!result.success) {
-      btn.disabled = false;
-      btn.textContent = "Sign in";
-      status.textContent =
-        result.error === "timeout"
-          ? "Sign-in timed out. Try again."
-          : `Sign-in failed: ${result.error ?? "unknown error"}`;
-    }
-  });
-
-  window.headspace.onAuthChanged(applyStatus);
-  void window.headspace.authStatus().then(applyStatus);
+/** Replaces the EQ panel grid with Volume + Balance sliders + Queue placeholder. */
+function setupQueueDrawerStub() {
+  const panel = document.getElementById("eq-panel");
+  if (!panel) return;
+  panel.innerHTML = `
+    <div class="qd-section qd-volume">
+      <div class="qd-label">Volume</div>
+      <div id="slot-volume-spotify"></div>
+    </div>
+    <div class="qd-section qd-now">
+      <div class="qd-label">Now Playing</div>
+      <div id="left-now-view" class="qd-now-card">
+        <div class="qd-now-art"></div>
+        <div class="qd-now-text">
+          <div class="qd-now-title">Awaiting playback</div>
+          <div class="qd-now-sub">Pick a track from the right ear</div>
+        </div>
+      </div>
+    </div>
+    <div class="qd-section qd-queue">
+      <div id="queue-view"></div>
+    </div>
+    <div class="qd-balance-advanced">
+      <span id="qd-balance-note" class="qd-sub-note"></span>
+      <div id="slot-balance-spotify"></div>
+    </div>
+  `;
 }
 
 (async () => {
-  await buildHeadMask();
-  wireHitTesting();
-  wireDrag();
+  await initHitTest();
 
   const vizCanvas = document.getElementById("vis-canvas") as HTMLCanvasElement;
   const viz = new Visualizer(vizCanvas);
   const liveAudio = new LiveAudio();
 
-  // Milkdrop (butterchurn) WebGL visualizer. Lazy-inits against the live
-  // audio graph the first time the mode is shown with audio available.
   const bcCanvas = document.getElementById("butterchurn-canvas") as HTMLCanvasElement;
   const bcViz = new ButterchurnViz(bcCanvas);
-  let bcDropRaf: number | null = null;
-  let bcPresetTimer: number | null = null;
+  const milkdrop = new MilkdropDriver(bcViz, liveAudio);
 
-  // Live audio diagnostic HUD (Ctrl+Shift+A). Shows whether capture is real
-  // and reacting — the fastest way to tell "no signal" from "weak signal".
-  // It observes the persistent LiveAudio instance directly, so it reflects
-  // whatever source attaches (or none) without needing to be re-pointed.
   const audioHud = new AudioHud(document.getElementById("stage") ?? document.body);
   audioHud.setLiveAudio(liveAudio);
   document.addEventListener("keydown", (e) => {
@@ -232,83 +113,7 @@ function wireSpotifyAuth(onAuthed: () => void): void {
     }
   });
 
-  /** Attach butterchurn to the live audio graph if we have one and haven't yet. */
-  async function ensureButterchurn(): Promise<boolean> {
-    if (bcViz.isReady()) return true;
-    if (bcViz.hasFailed()) return false;
-    const graph = liveAudio.getAudioGraph();
-    if (!graph) return false;
-    return bcViz.init(graph.ctx, graph.node);
-  }
-
-  // Milkdrop preset controls (driven from the right-click menu on the screen).
-  // Locked = stay on the current preset (no auto-cycle, no drop switches).
-  const MILKDROP_CYCLE_OPTIONS = [10_000, 30_000, 60_000, 0]; // 0 = off
-  let milkdropLocked = localStorage.getItem("headspace.milkdrop.locked") === "1";
-  let milkdropCycleMs = Number(
-    localStorage.getItem("headspace.milkdrop.cycle") ?? "30000",
-  );
-  if (!MILKDROP_CYCLE_OPTIONS.includes(milkdropCycleMs)) milkdropCycleMs = 30_000;
-
-  /** React loop while milkdrop is active: preset switches on drops + a timer. */
-  function startMilkdropDrivers(): void {
-    stopMilkdropDrivers();
-    const poll = () => {
-      if (bcViz.isReady() && !milkdropLocked && liveAudio.checkDrop()) bcViz.onDrop();
-      bcDropRaf = requestAnimationFrame(poll);
-    };
-    bcDropRaf = requestAnimationFrame(poll);
-    if (!milkdropLocked && milkdropCycleMs > 0) {
-      bcPresetTimer = window.setInterval(() => {
-        if (bcViz.isReady() && !milkdropLocked) bcViz.nextPreset();
-      }, milkdropCycleMs);
-    }
-  }
-
-  function stopMilkdropDrivers(): void {
-    if (bcDropRaf !== null) cancelAnimationFrame(bcDropRaf);
-    bcDropRaf = null;
-    if (bcPresetTimer !== null) window.clearInterval(bcPresetTimer);
-    bcPresetTimer = null;
-  }
-
-  /** Re-arm the cycle timer after a lock/speed change, if milkdrop is live. */
-  function refreshMilkdropDrivers(): void {
-    if (document.body.classList.contains("vis-milkdrop") && bcViz.isReady()) {
-      startMilkdropDrivers();
-    }
-  }
-
-  function setMilkdropLocked(locked: boolean): void {
-    milkdropLocked = locked;
-    localStorage.setItem("headspace.milkdrop.locked", locked ? "1" : "0");
-    refreshMilkdropDrivers();
-  }
-
-  function setMilkdropCycle(ms: number): void {
-    milkdropCycleMs = ms;
-    localStorage.setItem("headspace.milkdrop.cycle", String(ms));
-    refreshMilkdropDrivers();
-  }
-
-  /** Show/hide milkdrop UI + manage the WebGL render loop for a given mode. */
-  async function applyVisModeUI(mode: VisMode): Promise<void> {
-    const isMilkdrop = mode === "milkdrop";
-    document.body.classList.toggle("vis-milkdrop", isMilkdrop);
-    if (isMilkdrop) {
-      const ok = await ensureButterchurn();
-      document.body.classList.toggle("milkdrop-idle", !ok);
-      if (ok) {
-        bcViz.resize();
-        bcViz.start();
-        startMilkdropDrivers();
-      }
-    } else {
-      bcViz.stop();
-      stopMilkdropDrivers();
-      document.body.classList.remove("milkdrop-idle");
-    }
-  }
+  const theme = new ThemeCycler(flashVisLabel);
 
   // ---------- Easter-egg: alive-face mode ----------
   // 5 left-clicks on the nose hitbox within 2s toggles the head's "alive"
@@ -341,21 +146,20 @@ function wireSpotifyAuth(onAuthed: () => void): void {
       faceAlive.boop();
     }
   });
+
   /**
    * Try the cheap audio-element tap first; if blocked by DRM (almost always),
    * fall through to WASAPI loopback via desktopCapturer. Both are gestureless
    * so this can run automatically on SDK ready.
    */
   async function tryEnableLiveAudio(): Promise<void> {
-    if (liveAudio.getSource()) return; // already attached
-    // Wait a beat for the SDK to actually create its <audio> element.
+    if (liveAudio.getSource()) return;
     await new Promise((r) => setTimeout(r, 1500));
     if (await liveAudio.tryTap()) {
       viz.setLiveAudio(liveAudio);
       faceAlive.setLiveAudio(liveAudio);
       refreshBalanceAvailability();
-      // If milkdrop is the active mode, it can now attach to the live graph.
-      void applyVisModeUI(viz.getMode());
+      void milkdrop.applyVisModeUI(viz.getMode());
       console.log("[viz] live audio: tap succeeded");
       return;
     }
@@ -363,7 +167,7 @@ function wireSpotifyAuth(onAuthed: () => void): void {
       viz.setLiveAudio(liveAudio);
       faceAlive.setLiveAudio(liveAudio);
       refreshBalanceAvailability();
-      void applyVisModeUI(viz.getMode());
+      void milkdrop.applyVisModeUI(viz.getMode());
       console.log(
         "[viz] live audio: loopback active (capturing system audio — captures ALL audio, not just Spotify)",
       );
@@ -381,10 +185,9 @@ function wireSpotifyAuth(onAuthed: () => void): void {
     faceAlive.setLiveAudio(null);
     refreshBalanceAvailability();
     await tryEnableLiveAudio();
-    if (diagContainer) await renderRuntimeDiagnostics(diagContainer);
+    if (diagContainer) await renderRuntimeDiagnostics(diagContainer, controller, liveAudio);
   }
 
-  // Ctrl+L → manual retry if auto-init failed for some reason.
   document.addEventListener("keydown", (e) => {
     if (e.ctrlKey && e.key.toLowerCase() === "l") {
       e.preventDefault();
@@ -392,146 +195,6 @@ function wireSpotifyAuth(onAuthed: () => void): void {
     }
   });
 
-  // ---------- Theme cycler ----------
-  let currentThemeId = localStorage.getItem(STORAGE_KEYS.theme) ?? "lime";
-  let lastAutoHue: number | null = null;
-
-  const themeBtn = document.getElementById("btn-theme-toggle") as HTMLButtonElement;
-  const THEME_BUTTON_LABELS: Record<string, string> = {
-    crimson: "CRIMS",
-    magenta: "MAGEN",
-    cobalt: "COB",
-    auto: "AUTO",
-  };
-
-  function applyCurrentTheme(): void {
-    const base = getTheme(currentThemeId);
-    if (base.id === "auto" && lastAutoHue !== null) {
-      applyTheme(autoThemeFromHue(lastAutoHue));
-    } else {
-      applyTheme(base);
-    }
-    themeBtn.textContent = THEME_BUTTON_LABELS[base.id] ?? base.name.toUpperCase();
-    themeBtn.title = `Theme: ${base.name}`;
-  }
-  applyCurrentTheme();
-
-  themeBtn.addEventListener("click", () => {
-    const idx = THEMES.findIndex((t) => t.id === currentThemeId);
-    const next = THEMES[(idx + 1) % THEMES.length];
-    currentThemeId = next.id;
-    localStorage.setItem(STORAGE_KEYS.theme, currentThemeId);
-    applyCurrentTheme();
-    flashVisLabel(`Theme: ${next.name}`);
-  });
-
-  /** Called when album-art palette is extracted; updates Auto theme. */
-  function setAutoThemeHue(hueDeg: number) {
-    lastAutoHue = hueDeg;
-    if (currentThemeId === "auto") applyCurrentTheme();
-  }
-
-  // ---------- Lyrics state + UI ----------
-  let lyricsEnabled = localStorage.getItem(STORAGE_KEYS.lyricsOn) === "1";
-  let currentLyrics: LyricsTrack | null = null;
-  let lyricsTrackId: string | null = null;
-  let lyricsLoading = false;
-  let lastRenderedLineIdx = -2;
-  const lyricsBtn = document.getElementById("btn-lyrics-toggle") as HTMLButtonElement;
-  const lyricsOverlay = document.getElementById("lyrics-overlay")!;
-  const lyPrev = document.getElementById("ly-prev")!;
-  const lyCurrent = document.getElementById("ly-current")!;
-  const lyNext = document.getElementById("ly-next")!;
-
-  function refreshLyricsButton() {
-    lyricsBtn.classList.toggle("active", lyricsEnabled);
-    lyricsOverlay.classList.toggle("show", lyricsEnabled && !!currentLyrics);
-  }
-  refreshLyricsButton();
-
-  lyricsBtn.addEventListener("click", () => {
-    lyricsEnabled = !lyricsEnabled;
-    localStorage.setItem(STORAGE_KEYS.lyricsOn, lyricsEnabled ? "1" : "0");
-    refreshLyricsButton();
-    // If turned on without a track loaded yet, kick a fetch.
-    if (lyricsEnabled) {
-      const s = controller.state();
-      if (s.track) void loadLyricsForCurrentTrack();
-    }
-  });
-
-  async function loadLyricsForCurrentTrack(): Promise<void> {
-    const s = controller.state();
-    if (!s.track) return;
-    if (lyricsLoading) return;
-    if (s.track.id === lyricsTrackId && currentLyrics) return;
-    lyricsLoading = true;
-    lyricsTrackId = s.track.id;
-    currentLyrics = null;
-    lastRenderedLineIdx = -2;
-    showLyricsStatus("Loading lyrics...");
-    try {
-      const res = await window.headspace.getLyrics({
-        trackId: s.track.id,
-        artist: s.track.artists[0]?.name ?? "",
-        track: s.track.name,
-        album: s.track.album.name,
-        durationSec: s.durationMs ? Math.round(s.durationMs / 1000) : undefined,
-      });
-      // Discard if user already moved on to another track during the fetch.
-      if (lyricsTrackId !== s.track.id) return;
-      currentLyrics = buildLyricsTrack(res);
-      if (currentLyrics.instrumental) {
-        showLyricsStatus("♪ instrumental");
-      } else if (!currentLyrics.hasSynced && currentLyrics.plain.length === 0) {
-        showLyricsStatus("No lyrics found");
-      } else if (!currentLyrics.hasSynced) {
-        showPlainLyrics(currentLyrics.plain);
-      }
-      refreshLyricsButton();
-    } finally {
-      lyricsLoading = false;
-    }
-  }
-
-  function showLyricsStatus(text: string) {
-    lyPrev.textContent = "";
-    lyCurrent.innerHTML = `<span class="ly-status">${escapeHtml(text)}</span>`;
-    lyNext.textContent = "";
-  }
-
-  function showPlainLyrics(lines: string[]) {
-    // Plain lyrics: render the first 6 non-empty lines stacked. No sync.
-    const first = lines.filter((l) => l.length > 0).slice(0, 6);
-    lyPrev.textContent = "";
-    lyCurrent.textContent = first.join("\n");
-    lyNext.innerHTML = `<span class="ly-status">(unsynced)</span>`;
-  }
-
-  function escapeHtml(s: string): string {
-    return s
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;");
-  }
-
-  function tickLyrics(positionMs: number) {
-    if (!lyricsEnabled || !currentLyrics || !currentLyrics.hasSynced) return;
-    const idx = findActiveLineIndex(currentLyrics.lines, positionMs);
-    if (idx === lastRenderedLineIdx) return;
-    lastRenderedLineIdx = idx;
-    const lines = currentLyrics.lines;
-    const cur = idx >= 0 ? lines[idx]?.text ?? "" : "";
-    const prev = idx > 0 ? lines[idx - 1]?.text ?? "" : "";
-    const next = idx + 1 < lines.length ? lines[idx + 1]?.text ?? "" : "";
-    lyPrev.textContent = prev;
-    lyCurrent.textContent = cur || "♪";
-    lyNext.textContent = next;
-  }
-
-  // Replace the original EQ panel (Headspace v1 used 5 EQ bands + balance
-  // sliders, neither of which Spotify exposes via the Web Playback SDK) with
-  // working Volume + Balance sliders and a Queue placeholder.
   setupQueueDrawerStub();
 
   const skin = new SkinState({
@@ -540,55 +203,25 @@ function wireSpotifyAuth(onAuthed: () => void): void {
     plHandle: document.getElementById("btn-pl-handle")!,
     eqHandle: document.getElementById("btn-eq-handle")!,
   });
+  const mini = new MiniMode(skin);
 
-  let miniMode = localStorage.getItem("headspaceMiniMode") === "1";
-  const miniBtn = document.getElementById("btn-mini-mode")!;
-  function applyMiniMode(enabled: boolean) {
-    miniMode = enabled;
-    localStorage.setItem("headspaceMiniMode", enabled ? "1" : "0");
-    if (enabled) skin.closeAll();
-    document.body.classList.toggle("mini", enabled);
-    miniBtn.classList.toggle("active", enabled);
-    miniBtn.title = enabled ? "Exit desk buddy mode" : "Desk buddy mode";
-    window.headspace.setSize(
-      Math.round(VIEW_W_CLOSED * (enabled ? MINI_SCALE : 1)),
-      Math.round(HEAD_H * (enabled ? MINI_SCALE : 1)),
-    );
-  }
+  document.getElementById("btn-pl-handle")!.addEventListener("click", () => {
+    mini.exitForDrawer();
+    skin.togglePlaylist();
+  });
+  document.getElementById("btn-pl-open")!.addEventListener("click", () => {
+    mini.exitForDrawer();
+    skin.togglePlaylist();
+  });
+  document.getElementById("btn-eq-handle")!.addEventListener("click", () => {
+    mini.exitForDrawer();
+    skin.toggleEq();
+  });
+  document.getElementById("btn-eq-open")!.addEventListener("click", () => {
+    mini.exitForDrawer();
+    skin.toggleEq();
+  });
 
-  function exitMiniForDrawer() {
-    if (miniMode) applyMiniMode(false);
-  }
-
-  // Drawer toggles
-  document
-    .getElementById("btn-pl-handle")!
-    .addEventListener("click", () => {
-      exitMiniForDrawer();
-      skin.togglePlaylist();
-    });
-  document
-    .getElementById("btn-pl-open")!
-    .addEventListener("click", () => {
-      exitMiniForDrawer();
-      skin.togglePlaylist();
-    });
-  document
-    .getElementById("btn-eq-handle")!
-    .addEventListener("click", () => {
-      exitMiniForDrawer();
-      skin.toggleEq();
-    });
-  document
-    .getElementById("btn-eq-open")!
-    .addEventListener("click", () => {
-      exitMiniForDrawer();
-      skin.toggleEq();
-    });
-  miniBtn.addEventListener("click", () => applyMiniMode(!miniMode));
-  applyMiniMode(miniMode);
-
-  // Window controls
   document
     .getElementById("btn-minimize")!
     .addEventListener("click", () => window.headspace.minimize());
@@ -596,393 +229,49 @@ function wireSpotifyAuth(onAuthed: () => void): void {
     .getElementById("btn-close")!
     .addEventListener("click", () => window.headspace.close());
 
-  // Now-playing strip
   const nowPlaying = document.getElementById("now-playing")!;
-  const leftNowView = document.getElementById("left-now-view")!;
-  const pauseOverlay = document.getElementById("pause-overlay")!;
-
   const controller = new SpotifyController();
   wireKeys(controller, faceAlive);
   attachMediaSession(controller);
-  const queueView = new QueueView(
-    document.getElementById("queue-view")!,
+  const queueView = new QueueView(document.getElementById("queue-view")!, controller);
+  const lyrics = new LyricsPanel(controller);
+  const status = new StatusOverlay();
+
+  wireVisMenu(viz, milkdrop);
+  wireNowPlaying({ controller, viz, faceAlive, queueView, lyrics, theme });
+
+  const renderSpotifySettings = createSettingsRenderer({
     controller,
-  );
-
-  // Vis-mode label that flashes in the corner of the face screen on change.
-  function flashVisLabel(text: string) {
-    const el = document.getElementById("vis-mode-label")!;
-    el.textContent = text;
-    el.classList.remove("show");
-    // Force reflow so the animation restarts even if the same label fires twice.
-    void el.offsetWidth;
-    el.classList.add("show");
-  }
-
-  // ---------- Right-click visualizer / Milkdrop menu ----------
-  const visHit = document.getElementById("vis-hit")!;
-  const visMenu = document.getElementById("vis-context-menu")!;
-  let visMenuOpen = false;
-
-  function hideVisMenu() {
-    visMenuOpen = false;
-    visMenu.classList.remove("show");
-  }
-
-  function switchVisMode(mode: VisMode) {
-    viz.setMode(mode);
-    flashVisLabel(Visualizer.labelFor(mode));
-    void applyVisModeUI(mode);
-  }
-
-  function cycleLabel(ms: number): string {
-    return ms === 0 ? "Off" : `${Math.round(ms / 1000)}s`;
-  }
-
-  function renderVisMenu(x: number, y: number) {
-    const mode = viz.getMode();
-    visMenu.innerHTML = "";
-    const addHead = (t: string) => {
-      const d = document.createElement("div");
-      d.className = "vm-head";
-      d.textContent = t;
-      visMenu.appendChild(d);
-    };
-    const addSep = () => {
-      const d = document.createElement("div");
-      d.className = "vm-sep";
-      visMenu.appendChild(d);
-    };
-    const addItem = (
-      label: string,
-      opts: { val?: string; on?: boolean; keepOpen?: boolean; action: () => void } = { action: () => {} },
-    ) => {
-      const d = document.createElement("div");
-      d.className = "vm-item" + (opts.on ? " vm-on" : "");
-      const l = document.createElement("span");
-      l.textContent = label;
-      d.appendChild(l);
-      if (opts.val !== undefined) {
-        const v = document.createElement("span");
-        v.className = "vm-val";
-        v.textContent = opts.val;
-        d.appendChild(v);
-      }
-      d.addEventListener("click", (ev) => {
-        ev.stopPropagation();
-        opts.action();
-        if (opts.keepOpen) renderVisMenu(x, y);
-        else hideVisMenu();
-      });
-      visMenu.appendChild(d);
-    };
-
-    addHead(`Visualizer · ${Visualizer.labelFor(mode)}`);
-    if (mode === "milkdrop") {
-      if (bcViz.isReady()) {
-        addHead(bcViz.currentPresetName());
-        addItem("Next preset", { keepOpen: true, action: () => bcViz.nextPreset() });
-        addItem("Previous preset", { keepOpen: true, action: () => bcViz.prevPreset() });
-        addItem("Random preset", { keepOpen: true, action: () => bcViz.randomPreset() });
-        addItem("Lock preset", {
-          val: milkdropLocked ? "ON" : "off",
-          on: milkdropLocked,
-          keepOpen: true,
-          action: () => setMilkdropLocked(!milkdropLocked),
-        });
-        addItem("Auto-cycle", {
-          val: cycleLabel(milkdropCycleMs),
-          keepOpen: true,
-          action: () => {
-            const i = MILKDROP_CYCLE_OPTIONS.indexOf(milkdropCycleMs);
-            setMilkdropCycle(MILKDROP_CYCLE_OPTIONS[(i + 1) % MILKDROP_CYCLE_OPTIONS.length]);
-          },
-        });
-      } else {
-        addHead("no live audio — play a track");
-      }
-      addSep();
-      addItem("Next visualizer mode", {
-        action: () => {
-          const m = viz.cycleMode();
-          flashVisLabel(Visualizer.labelFor(m));
-          void applyVisModeUI(m);
-        },
-      });
-    } else {
-      addItem("Switch to Milkdrop", { action: () => switchVisMode("milkdrop") });
-      addItem("Next visualizer mode", {
-        action: () => {
-          const m = viz.cycleMode();
-          flashVisLabel(Visualizer.labelFor(m));
-          void applyVisModeUI(m);
-        },
-      });
-    }
-
-    // Show, then clamp within the window now that the size is known.
-    visMenu.classList.add("show");
-    visMenuOpen = true;
-    const w = visMenu.offsetWidth;
-    const h = visMenu.offsetHeight;
-    visMenu.style.left = `${Math.max(4, Math.min(x, window.innerWidth - w - 4))}px`;
-    visMenu.style.top = `${Math.max(4, Math.min(y, window.innerHeight - h - 4))}px`;
-  }
-
-  visHit.addEventListener("contextmenu", (e) => {
-    e.preventDefault();
-    renderVisMenu(e.clientX, e.clientY);
+    liveAudio,
+    status,
+    tryInitController,
+    reconnectLiveAudio,
   });
-  document.addEventListener("pointerdown", (e) => {
-    if (visMenuOpen && !visMenu.contains(e.target as Node)) hideVisMenu();
-  });
-
-  // Long-form status overlay (full message visible, doesn't truncate).
-  const statusOverlay = document.getElementById("status-overlay")!;
-  const statusTitle = document.getElementById("so-title")!;
-  const statusBody = document.getElementById("so-body")!;
-  const statusActions = document.getElementById("so-actions")!;
-  let statusHideTimer: number | null = null;
-
-  interface StatusAction {
-    label: string;
-    primary?: boolean;
-    onClick: () => void | Promise<void>;
-  }
-
-  function showStatus(
-    title: string,
-    body: string,
-    opts: { durationMs?: number; actions?: StatusAction[] } = {},
-  ) {
-    statusTitle.textContent = title;
-    statusBody.textContent = body;
-    statusActions.innerHTML = "";
-    for (const a of opts.actions ?? []) {
-      const b = document.createElement("button");
-      if (a.primary) b.className = "primary";
-      b.textContent = a.label;
-      b.addEventListener("click", () => void a.onClick());
-      statusActions.appendChild(b);
-    }
-    if (!opts.actions?.length) {
-      const dismiss = document.createElement("button");
-      dismiss.textContent = "Dismiss";
-      dismiss.addEventListener("click", hideStatus);
-      statusActions.appendChild(dismiss);
-    }
-    statusOverlay.classList.add("show");
-    if (statusHideTimer) window.clearTimeout(statusHideTimer);
-    const ms = opts.durationMs;
-    if (ms !== undefined && ms > 0) {
-      statusHideTimer = window.setTimeout(hideStatus, ms);
-    }
-  }
-
-  function hideStatus() {
-    if (statusHideTimer) window.clearTimeout(statusHideTimer);
-    statusOverlay.classList.remove("show");
-  }
-
-  function playbackErrorText(err: string): string {
-    if (err === "no_device") {
-      return "Open Spotify on your phone, desktop, or web player, then try again.";
-    }
-    if (err.includes("no active unrestricted Spotify device")) {
-      return "Spotify is signed in, but no active playback device is available. Open Spotify somewhere and start/transfer playback once.";
-    }
-    return err;
-  }
-
-  function showPlaybackError(err: string): void {
-    showStatus("Playback error", playbackErrorText(err), { durationMs: 7000 });
-  }
-
-  async function runPlaybackCommand(
-    label: string,
-    command: () => Promise<void>,
-  ): Promise<void> {
-    const startedAt = Date.now();
-    await command();
-    const diag = controller.getDiagnostics();
-    if (diag.lastError && diag.lastCommandAt && diag.lastCommandAt >= startedAt - 50) {
-      showStatus(`${label} failed`, playbackErrorText(diag.lastError), {
-        durationMs: 7000,
-      });
-    }
-  }
-
-  async function signOutAndReload() {
-    await window.headspace.authSignOut();
-    window.location.reload();
-  }
-
-  async function switchSpotifyAccount() {
-    await window.headspace.authSignOut();
-    showStatus(
-      "Switch Spotify account",
-      "Opening Spotify sign-in in your browser. If Spotify keeps selecting the same account, sign out at spotify.com in that browser and try again.",
-      { durationMs: 7000 },
-    );
-    const result = await window.headspace.authSignIn({ showDialog: true });
-    if (result.success) window.location.reload();
-    else {
-      showStatus("Sign-in failed", result.error ?? "Unknown error.", {
-        durationMs: 7000,
-      });
-    }
-  }
-
-  async function renderSpotifySettings(container: HTMLElement) {
-    container.innerHTML = "";
-    const panel = document.createElement("div");
-    panel.className = "settings-panel";
-    const title = document.createElement("div");
-    title.className = "settings-title";
-    title.textContent = "Spotify";
-    const body = document.createElement("div");
-    body.className = "settings-body";
-    const diagList = document.createElement("dl");
-    diagList.className = "settings-diag";
-    const actions = document.createElement("div");
-    actions.className = "settings-actions";
-    panel.append(title, body, diagList, actions);
-    container.appendChild(panel);
-
-    const auth = await window.headspace.authStatus();
-    if (!auth.authenticated) {
-      body.textContent =
-        "Not signed in.\n\nAdd SPOTIFY_CLIENT_ID to .env, then sign in with Spotify.\n\nRedirect URI:\nhttp://127.0.0.1:8888/callback";
-      const signIn = document.createElement("button");
-      signIn.className = "primary";
-      signIn.textContent = "Sign in";
-      signIn.addEventListener("click", async () => {
-        const result = await window.headspace.authSignIn({ showDialog: true });
-        if (result.success) window.location.reload();
-        else showStatus("Sign-in failed", result.error ?? "Unknown error.");
-      });
-      actions.append(signIn);
-      return;
-    }
-
-    let accountLine = "Signed in to Spotify.";
-    const user = await window.headspace.spUser();
-    if (user && !isErrorResult(user)) {
-      const name = user.display_name || user.id || "Spotify user";
-      accountLine = `Signed in as ${name}${user.email ? `\n${user.email}` : ""}.`;
-    }
-
-    body.textContent = accountLine;
-    await renderRuntimeDiagnostics(diagList);
-
-    const switchBtn = document.createElement("button");
-    switchBtn.className = "primary";
-    switchBtn.textContent = "Switch";
-    switchBtn.addEventListener("click", switchSpotifyAccount);
-    const signOutBtn = document.createElement("button");
-    signOutBtn.textContent = "Sign out";
-    signOutBtn.addEventListener("click", signOutAndReload);
-    const refreshBtn = document.createElement("button");
-    refreshBtn.textContent = "Refresh";
-    refreshBtn.addEventListener("click", () => {
-      void renderSpotifySettings(container);
-    });
-    const retrySdkBtn = document.createElement("button");
-    retrySdkBtn.className = "primary";
-    retrySdkBtn.textContent = "Retry SDK";
-    retrySdkBtn.addEventListener("click", async () => {
-      showStatus(
-        "Retrying SDK",
-        "Re-initializing Spotify Web Playback SDK... (up to 15s)",
-        { durationMs: 0 },
-      );
-      await tryInitController();
-      await renderRuntimeDiagnostics(diagList);
-    });
-    const reconnectVizBtn = document.createElement("button");
-    reconnectVizBtn.textContent = "Reconnect Viz";
-    reconnectVizBtn.addEventListener("click", async () => {
-      showStatus(
-        "Reconnecting visualizer",
-        "Refreshing the live audio capture source...",
-        { durationMs: 2500 },
-      );
-      await reconnectLiveAudio(diagList);
-    });
-    const resetDrmBtn = document.createElement("button");
-    resetDrmBtn.textContent = "Reset DRM";
-    resetDrmBtn.addEventListener("click", async () => {
-      showStatus(
-        "Resetting Widevine",
-        "Clearing cached components and reinstalling. This can take 30-60 seconds.",
-        { durationMs: 0 },
-      );
-      await window.headspace.systemResetWidevine();
-      await renderRuntimeDiagnostics(diagList);
-      await tryInitController();
-    });
-    actions.append(
-      retrySdkBtn,
-      reconnectVizBtn,
-      refreshBtn,
-      switchBtn,
-      signOutBtn,
-      resetDrmBtn,
-    );
-  }
-
-  async function renderRuntimeDiagnostics(container: HTMLElement) {
-    container.innerHTML = "";
-    const diag = await window.headspace.systemDiag();
-    const playback = controller.getDiagnostics();
-    const widevine = summarizeWidevineDiag(diag.components);
-    const rows: Array<[string, string]> = [
-      ["Mode", playback.mode],
-      ["Device", formatDeviceDiag(playback)],
-      ["Viz", liveAudio.getSource() ?? "synthetic"],
-      ["Last", formatLastCommandDiag(playback)],
-      ["Widevine", widevine.failed ? "failed" : widevine.text],
-      ["Runtime", `Electron ${diag.electronVersion}`],
-    ];
-    for (const [label, value] of rows) {
-      const dt = document.createElement("dt");
-      dt.textContent = label;
-      const dd = document.createElement("dd");
-      dd.textContent = value;
-      dd.title = value;
-      container.append(dt, dd);
-    }
-  }
 
   await Transport.create(document.getElementById("transport")!, {
     onClick: (btn) => {
       if (btn === "play") {
-        void runPlaybackCommand("Play", () => controller.togglePlay());
+        void status.runPlaybackCommand(controller, "Play", () => controller.togglePlay());
       } else if (btn === "stop") {
-        // No real "stop" in Spotify; keep the skin button as play/pause.
-        void runPlaybackCommand("Pause", () => controller.togglePlay());
+        void status.runPlaybackCommand(controller, "Pause", () => controller.togglePlay());
       } else if (btn === "next") {
-        void runPlaybackCommand("Next", () => controller.next());
+        void status.runPlaybackCommand(controller, "Next", () => controller.next());
       } else if (btn === "prev") {
-        void runPlaybackCommand("Previous", () => controller.previous());
-      }
-      else if (btn === "vis") {
+        void status.runPlaybackCommand(controller, "Previous", () => controller.previous());
+      } else if (btn === "vis") {
         const next = viz.cycleMode();
         flashVisLabel(Visualizer.labelFor(next));
-        void applyVisModeUI(next);
+        void milkdrop.applyVisModeUI(next);
       }
     },
   });
 
-  // Show current mode briefly on startup so user knows what they're seeing.
   flashVisLabel(Visualizer.labelFor(viz.getMode()));
-  void applyVisModeUI(viz.getMode());
+  void milkdrop.applyVisModeUI(viz.getMode());
 
-  // Library browser populated only after auth.
   const drawerBody = document.getElementById("pl-drawer-body")!;
   let library: LibraryBrowser | null = null;
 
-  // ---------- Volume + Balance sliders (left "EQ" drawer) ----------
   const storedVolume = parseFloat(localStorage.getItem(STORAGE_KEYS.volume) ?? "");
   const initialVolume = Number.isFinite(storedVolume) ? storedVolume : 0.85;
 
@@ -1000,7 +289,6 @@ function wireSpotifyAuth(onAuthed: () => void): void {
     },
   });
   volumeSlot.appendChild(volumeSlider.el);
-  // Apply persisted volume to the SDK as soon as it becomes ready.
   let appliedInitialVolume = false;
 
   const storedBalance = parseFloat(localStorage.getItem(STORAGE_KEYS.balance) ?? "0");
@@ -1021,9 +309,7 @@ function wireSpotifyAuth(onAuthed: () => void): void {
     },
   });
   balanceSlot.appendChild(balanceSlider.el);
-  // Balance only works when the audio-element tap path is active. With
-  // loopback or synthetic, we can't intercept playback — the slider stays
-  // disabled and shows a small note explaining why.
+
   function refreshBalanceAvailability() {
     const can = liveAudio.canPan();
     balanceSlider.setEnabled(can);
@@ -1032,164 +318,39 @@ function wireSpotifyAuth(onAuthed: () => void): void {
   }
   refreshBalanceAvailability();
 
-  // Subscribe to controller state — drives now-playing, art, seek, pause overlay,
-  // and feeds visualizer the current playback position + analysis on track change.
-  let lastTrackId: string | null = null;
-  let trackChangeToken = 0; // race guard for any per-track async work
-  // Spotify killed /audio-analysis for new apps (Nov 2024). After the first
-  // error we stop probing and go straight to the synthetic fallback.
-  let audioAnalysisUnavailable = false;
-  let lastIsPlaying: boolean | null = null;
-  let leftNowRenderedId: string | null = null;
-  // Cache the seek-fill element so we don't re-query the DOM every state tick.
-  const seekFill = document.getElementById("seek-fill") as HTMLDivElement;
-
-  function renderLeftNow(track: SpotifyState["track"], artistNames = "") {
-    leftNowView.innerHTML = "";
-    const artUrl = track?.album.images.at(-1)?.url ?? track?.album.images[0]?.url ?? "";
-    if (artUrl) {
-      const img = document.createElement("img");
-      img.className = "qd-now-art";
-      img.src = artUrl;
-      img.alt = "";
-      leftNowView.appendChild(img);
-    } else {
-      const art = document.createElement("div");
-      art.className = "qd-now-art";
-      leftNowView.appendChild(art);
-    }
-    const text = document.createElement("div");
-    text.className = "qd-now-text";
-    const title = document.createElement("div");
-    title.className = "qd-now-title";
-    const sub = document.createElement("div");
-    sub.className = "qd-now-sub";
-    title.textContent = track?.name ?? "Awaiting playback";
-    sub.textContent = track ? artistNames || "Spotify" : "Pick a track from the right ear";
-    text.append(title, sub);
-    leftNowView.appendChild(text);
-  }
-
-  controller.on((s: SpotifyState) => {
-    queueView.handleState(s);
-    if (s.track) {
-      const artistNames = s.track.artists.map((a) => a.name).join(", ");
-      nowPlaying.textContent = `${artistNames} — ${s.track.name}`;
-      if (leftNowRenderedId !== s.track.id) {
-        leftNowRenderedId = s.track.id;
-        renderLeftNow(s.track, artistNames);
-      }
-      if (s.track.id !== lastTrackId) {
-        lastTrackId = s.track.id;
-        // Curious reading glance toward the title ticker (no-op unless alive).
-        faceAlive.notifyTrackChange();
-        // Single token guards every per-track async fetch (palette + analysis).
-        // If the user skips tracks rapidly, late-arriving promises for old
-        // tracks are dropped instead of overwriting the current track's data.
-        const token = ++trackChangeToken;
-        const url = s.track.album.images[0]?.url ?? null;
-        viz.setCoverArt(url);
-        if (url) {
-          void extractPalette(url).then((p) => {
-            if (token !== trackChangeToken) return; // stale — user skipped
-            viz.setPalette(p);
-            setAutoThemeHue(p.primaryHueDeg);
-          });
-        } else {
-          viz.setPalette(DEFAULT_PALETTE);
-          setAutoThemeHue(95); // lime default
-        }
-        // Reset lyrics for the new track. Fetch only if user wants them.
-        currentLyrics = null;
-        lyricsTrackId = null;
-        lastRenderedLineIdx = -2;
-        if (lyricsEnabled) void loadLyricsForCurrentTrack();
-        refreshLyricsButton();
-        // Fetch fresh audio analysis for beat-synced modes.
-        viz.setAnalysis(null);
-        const trackDuration = s.track.duration_ms;
-        if (audioAnalysisUnavailable) {
-          viz.setAnalysis(buildSyntheticAnalysis(trackDuration) as never);
-        } else {
-          void window.headspace.spAnalysis(s.track.id).then((res) => {
-            if (token !== trackChangeToken) return; // stale
-            if (res && !isErrorResult(res)) {
-              viz.setAnalysis(res as never);
-            } else {
-              audioAnalysisUnavailable = true;
-              viz.setAnalysis(buildSyntheticAnalysis(trackDuration) as never);
-            }
-          });
-        }
-      }
-    } else {
-      nowPlaying.textContent = "— signed in, awaiting playback —";
-      if (leftNowRenderedId !== null) {
-        leftNowRenderedId = null;
-        renderLeftNow(null);
-      }
-    }
-    viz.setPlaying(s.isPlaying);
-    faceAlive.setPlaying(s.isPlaying);
-    viz.setPosition(s.positionMs);
-    tickLyrics(s.positionMs);
-    // Skip DOM write when the playing flag hasn't actually changed; the state
-    // tick fires several times a second and DOM writes trigger style recalc.
-    if (s.isPlaying !== lastIsPlaying) {
-      lastIsPlaying = s.isPlaying;
-      if (s.isPlaying) pauseOverlay.removeAttribute("hidden");
-      else pauseOverlay.setAttribute("hidden", "");
-    }
-    if (s.durationMs > 0) {
-      seekFill.style.width = `${Math.min(100, (s.positionMs / s.durationMs) * 100)}%`;
-    } else {
-      seekFill.style.width = "0%";
-    }
-  });
-
-  // Seek slider — click anywhere on the track to jump
   const seek = document.getElementById("seek-track")!;
   seek.addEventListener("click", (e) => {
     const r = seek.getBoundingClientRect();
     const pct = (e.clientX - r.left) / r.width;
     const dur = controller.state().durationMs;
     if (dur > 0) {
-      void runPlaybackCommand("Seek", () => controller.seek(pct * dur));
+      void status.runPlaybackCommand(controller, "Seek", () => controller.seek(pct * dur));
     }
   });
 
-  // Once authed, init the controller (SDK first, Connect fallback) and library.
   let initialized = false;
 
   async function tryInitController() {
     nowPlaying.textContent = "Connecting to Spotify...";
     const result = await controller.init();
     if (result.mode === "sdk") {
-      hideStatus();
+      status.hide();
       nowPlaying.textContent = "Ready. Pick a track from the playlist drawer.";
-      // Apply the persisted volume to the SDK so the slider's position
-      // reflects what's actually playing.
       if (!appliedInitialVolume) {
         appliedInitialVolume = true;
         void controller.setVolume(volumeSlider.getValue());
       }
-      // Probe live audio. Tap usually fails under DRM, but try anyway —
-      // it's free. If it fails, user can press Ctrl+L to enable loopback.
       void tryEnableLiveAudio();
     } else if (result.mode === "connect") {
       nowPlaying.textContent =
         "Connect mode — open Spotify on a device, then pick a track.";
-      // Connect mode plays on another Spotify device, so there is no SDK
-      // <audio> element to tap. Start loopback capture so the visualizers can
-      // react to whatever is actually coming through the speakers.
       void tryEnableLiveAudio();
       console.warn("[headspace] SDK init failed:", result.error);
-      // Pull diag info so the user can see whether Widevine actually loaded.
       const diag = await window.headspace.systemDiag();
       const componentSummary = summarizeWidevineDiag(diag.components);
       const widevineFailed = componentSummary.failed;
       const sdkError = result.error ?? "unknown";
-      showStatus(
+      status.show(
         widevineFailed ? "Widevine install failed" : "In-app playback unavailable",
         widevineFailed
           ? `Spotify needs Widevine DRM to stream in-app, but the component setup failed:\n\n${componentSummary.text}\n\nLikely causes: Windows Defender / antivirus blocking the download, or a stuck partial install. Reset wipes the cache and retries cleanly.`
@@ -1202,14 +363,14 @@ function wireSpotifyAuth(onAuthed: () => void): void {
                   label: "Reset & Retry",
                   primary: true,
                   onClick: async () => {
-                    showStatus(
+                    status.show(
                       "Resetting Widevine...",
                       "Clearing cached components and reinstalling. This can take 30–60 seconds.",
                       { durationMs: 0 },
                     );
                     const r = await window.headspace.systemResetWidevine();
                     console.log("[headspace] reset result:", r);
-                    showStatus(
+                    status.show(
                       "Retrying SDK...",
                       "Component cache rebuilt. Re-initializing playback...",
                       { durationMs: 0 },
@@ -1217,14 +378,14 @@ function wireSpotifyAuth(onAuthed: () => void): void {
                     await tryInitController();
                   },
                 },
-                { label: "Use Connect", onClick: hideStatus },
+                { label: "Use Connect", onClick: () => status.hide() },
               ]
             : [
                 {
                   label: "Retry SDK",
                   primary: true,
                   onClick: async () => {
-                    showStatus(
+                    status.show(
                       "Retrying...",
                       "Re-initializing Spotify Web Playback SDK... (up to 15s)",
                       { durationMs: 0 },
@@ -1232,7 +393,7 @@ function wireSpotifyAuth(onAuthed: () => void): void {
                     await tryInitController();
                   },
                 },
-                { label: "Use Connect", onClick: hideStatus },
+                { label: "Use Connect", onClick: () => status.hide() },
               ],
         },
       );
@@ -1241,7 +402,6 @@ function wireSpotifyAuth(onAuthed: () => void): void {
 
   async function onAuthed() {
     if (initialized) {
-      // If user signs back in after a logout, the SDK might now succeed.
       void tryInitController();
       return;
     }
@@ -1257,9 +417,9 @@ function wireSpotifyAuth(onAuthed: () => void): void {
       },
     });
     library.setErrorHandler((err) => {
-      showPlaybackError(err);
+      status.showPlaybackError(err);
     });
-    queueView.setErrorHandler(showPlaybackError);
+    queueView.setErrorHandler((err) => status.showPlaybackError(err));
     setTimeout(() => skin.togglePlaylist(), 600);
   }
 
@@ -1269,88 +429,3 @@ function wireSpotifyAuth(onAuthed: () => void): void {
     "[headspace] v2 ready · Space=play/pause · Esc=quit · Ctrl+T=on-top · Ctrl+D=mask · Ctrl+L=live audio",
   );
 })();
-
-function summarizeWidevineDiag(diag?: WidevineDiag): { failed: boolean; text: string } {
-  if (!diag) return { failed: true, text: "No component diagnostic available." };
-  if (diag.error || diag.ready === false) {
-    const details = diag.errors ? `\n${JSON.stringify(diag.errors)}` : "";
-    return {
-      failed: true,
-      text: `${diag.name ? `${diag.name}: ` : ""}${diag.error ?? "not ready"}${details}`,
-    };
-  }
-
-  const records: ComponentStatus[] = [
-    ...(Array.isArray(diag.result) ? diag.result : []),
-    ...Object.values(diag.status ?? {}),
-  ];
-  const widevine = records.find((record) => {
-    const title = record.title?.toLowerCase() ?? "";
-    return title.includes("widevine") || !!record.version;
-  });
-
-  if (widevine?.version) {
-    const status = widevine.status ? `${widevine.status}, ` : "";
-    return {
-      failed: false,
-      text: `${widevine.title ?? "Widevine"} (${status}version ${widevine.version})`,
-    };
-  }
-
-  if (diag.ready === true) {
-    return {
-      failed: false,
-      text: "Component loader reported ready, but did not return a Widevine version.",
-    };
-  }
-
-  return {
-    failed: true,
-    text: "Widevine component status was empty before setup completed.",
-  };
-}
-
-function formatDeviceDiag(diag: SpotifyControllerDiagnostics): string {
-  if (diag.deviceName) {
-    return `${diag.deviceName}${diag.deviceType ? ` (${diag.deviceType})` : ""}`;
-  }
-  if (diag.deviceId) return `active (${diag.deviceId.slice(0, 6)}...)`;
-  return diag.mode === "sdk" ? "Headspace starting" : "auto / none active";
-}
-
-function formatLastCommandDiag(diag: SpotifyControllerDiagnostics): string {
-  if (diag.lastError) {
-    return `${diag.lastCommand ?? "command"} failed: ${diag.lastError}`;
-  }
-  if (diag.lastCommand) return `${diag.lastCommand} OK`;
-  return "none";
-}
-
-/** Replaces the EQ panel grid with Volume + Balance sliders + Queue placeholder. */
-function setupQueueDrawerStub() {
-  const panel = document.getElementById("eq-panel");
-  if (!panel) return;
-  panel.innerHTML = `
-    <div class="qd-section qd-volume">
-      <div class="qd-label">Volume</div>
-      <div id="slot-volume-spotify"></div>
-    </div>
-    <div class="qd-section qd-now">
-      <div class="qd-label">Now Playing</div>
-      <div id="left-now-view" class="qd-now-card">
-        <div class="qd-now-art"></div>
-        <div class="qd-now-text">
-          <div class="qd-now-title">Awaiting playback</div>
-          <div class="qd-now-sub">Pick a track from the right ear</div>
-        </div>
-      </div>
-    </div>
-    <div class="qd-section qd-queue">
-      <div id="queue-view"></div>
-    </div>
-    <div class="qd-balance-advanced">
-      <span id="qd-balance-note" class="qd-sub-note"></span>
-      <div id="slot-balance-spotify"></div>
-    </div>
-  `;
-}
