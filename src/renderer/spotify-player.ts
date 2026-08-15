@@ -9,7 +9,7 @@
  */
 
 import type { SpotifyPlayOpts } from "../shared/ipc-api";
-import type { SpotifyTrack } from "../shared/spotify-types";
+import type { RepeatState, SpotifyTrack } from "../shared/spotify-types";
 import { isErrorResult } from "../shared/spotify-types";
 
 export interface SpotifyState {
@@ -17,6 +17,8 @@ export interface SpotifyState {
   isPlaying: boolean;
   positionMs: number;
   durationMs: number;
+  shuffle: boolean;
+  repeat: RepeatState;
 }
 
 declare global {
@@ -51,7 +53,15 @@ interface RawSdkState {
   paused: boolean;
   position: number;
   duration: number;
+  shuffle?: boolean;
+  repeat_mode?: 0 | 1 | 2;
   track_window: { current_track: SpotifyTrack };
+}
+
+function repeatFromSdk(mode?: 0 | 1 | 2): RepeatState {
+  if (mode === 2) return "track";
+  if (mode === 1) return "context";
+  return "off";
 }
 
 export type Mode = "sdk" | "connect" | "uninitialized";
@@ -85,7 +95,11 @@ export class SpotifyController {
     isPlaying: false,
     positionMs: 0,
     durationMs: 0,
+    shuffle: false,
+    repeat: "off",
   };
+  private liked = false;
+  private likedTrackId: string | null = null;
   private localPositionStartedAt = 0;
   private localPositionBaseMs = 0;
   private positionRafHandle: number | null = null;
@@ -278,6 +292,8 @@ export class SpotifyController {
       isPlaying: !raw.paused,
       positionMs: raw.position,
       durationMs: raw.duration,
+      shuffle: raw.shuffle ?? this.lastState.shuffle,
+      repeat: raw.repeat_mode !== undefined ? repeatFromSdk(raw.repeat_mode) : this.lastState.repeat,
     };
     this.localPositionBaseMs = raw.position;
     this.localPositionStartedAt = performance.now();
@@ -324,6 +340,8 @@ export class SpotifyController {
             isPlaying: r.is_playing,
             positionMs: progressMs,
             durationMs: r.item.duration_ms,
+            shuffle: r.shuffle_state ?? this.lastState.shuffle,
+            repeat: r.repeat_state ?? this.lastState.repeat,
           };
           if (r.device?.id) {
             this.deviceId = r.device.id;
@@ -589,6 +607,75 @@ export class SpotifyController {
     } catch (err) {
       this.recordCommandError("volume", String(err));
     }
+  }
+
+  isLiked(): boolean {
+    return this.liked;
+  }
+
+  async refreshLiked(trackId?: string): Promise<boolean> {
+    const id = trackId ?? this.lastState.track?.id;
+    if (!id) {
+      this.liked = false;
+      this.likedTrackId = null;
+      return false;
+    }
+    const res = await window.headspace.spLikedContains([id]);
+    if (isErrorResult(res)) {
+      this.liked = false;
+      this.likedTrackId = id;
+      return false;
+    }
+    this.liked = !!res[0];
+    this.likedTrackId = id;
+    this.emit();
+    return this.liked;
+  }
+
+  async toggleLike(): Promise<PlaybackCommandResult> {
+    const id = this.lastState.track?.id;
+    if (!id) return { ok: false, error: "no_track" };
+    if (this.likedTrackId !== id) await this.refreshLiked(id);
+    const next = !this.liked;
+    const r = next
+      ? await window.headspace.spSaveTracks([id])
+      : await window.headspace.spUnsaveTracks([id]);
+    const result = this.recordResult(next ? "like" : "unlike", r);
+    if (result.ok) {
+      this.liked = next;
+      this.likedTrackId = id;
+      this.emit();
+    }
+    return result;
+  }
+
+  async setShuffle(on: boolean): Promise<PlaybackCommandResult> {
+    const deviceId = await this.ensurePlayableDeviceId();
+    const r = await window.headspace.spShuffle(on, deviceId ?? undefined);
+    const result = this.recordResult("shuffle", r);
+    if (result.ok) {
+      this.lastState = { ...this.lastState, shuffle: on };
+      this.emit();
+    }
+    return result;
+  }
+
+  async cycleRepeat(): Promise<PlaybackCommandResult> {
+    const order: RepeatState[] = ["off", "context", "track"];
+    const next = order[(order.indexOf(this.lastState.repeat) + 1) % order.length];
+    const deviceId = await this.ensurePlayableDeviceId();
+    const r = await window.headspace.spRepeat(next, deviceId ?? undefined);
+    const result = this.recordResult("repeat", r);
+    if (result.ok) {
+      this.lastState = { ...this.lastState, repeat: next };
+      this.emit();
+    }
+    return result;
+  }
+
+  async transferTo(deviceId: string, play = true): Promise<PlaybackCommandResult> {
+    const r = await window.headspace.spTransfer(deviceId, play);
+    return this.recordResult("transfer", r);
   }
 
   async addToQueue(uri: string): Promise<PlaybackCommandResult> {

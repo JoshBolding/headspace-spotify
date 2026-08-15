@@ -14,6 +14,7 @@ import type {
   PlaybackDevice,
   PlaybackState,
   QueueResponse,
+  RepeatState,
   SpotifyPlaylist,
   SpotifyTrack,
   SpotifyUser,
@@ -310,4 +311,57 @@ export async function addToQueue(uri: string, deviceId?: string) {
 
 export async function getAudioAnalysis(trackId: string): Promise<AudioAnalysis> {
   return call<AudioAnalysis>(`/audio-analysis/${trackId}`);
+}
+
+// ---------------- library extras ----------------
+
+export async function getTopTracks(
+  offset = 0,
+  limit = 50,
+  timeRange: "short_term" | "medium_term" | "long_term" = "medium_term",
+): Promise<{ items: LibraryItem[]; total: number; next: boolean }> {
+  const res = await call<Paged<SpotifyTrack>>(
+    `/me/top/tracks?offset=${offset}&limit=${limit}&time_range=${timeRange}`,
+  );
+  return {
+    items: res.items.map((track) => ({ kind: "track" as const, track })),
+    total: res.total,
+    next: !!res.next,
+  };
+}
+
+export async function tracksAreSaved(ids: string[]): Promise<boolean[]> {
+  if (!ids.length) return [];
+  const safe = ids.filter(Boolean).slice(0, 50);
+  return call<boolean[]>(`/me/tracks/contains?ids=${safe.join(",")}`);
+}
+
+export async function saveTracks(ids: string[]): Promise<void> {
+  if (!ids.length) return;
+  await call(
+    "/me/tracks",
+    { method: "PUT", body: JSON.stringify({ ids: ids.slice(0, 50) }) },
+    false,
+  );
+}
+
+export async function removeSavedTracks(ids: string[]): Promise<void> {
+  if (!ids.length) return;
+  await call(
+    "/me/tracks",
+    { method: "DELETE", body: JSON.stringify({ ids: ids.slice(0, 50) }) },
+    false,
+  );
+}
+
+export async function setShuffle(state: boolean, deviceId?: string): Promise<void> {
+  const params = new URLSearchParams({ state: state ? "true" : "false" });
+  if (deviceId) params.set("device_id", deviceId);
+  await call(`/me/player/shuffle?${params.toString()}`, { method: "PUT" }, false);
+}
+
+export async function setRepeat(state: RepeatState, deviceId?: string): Promise<void> {
+  const params = new URLSearchParams({ state });
+  if (deviceId) params.set("device_id", deviceId);
+  await call(`/me/player/repeat?${params.toString()}`, { method: "PUT" }, false);
 }

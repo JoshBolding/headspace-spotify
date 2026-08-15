@@ -1289,6 +1289,118 @@
         box-shadow: 0 0 6px rgba(30, 215, 96, 0.4);
       }
 
+      #btn-like,
+      #btn-shuffle,
+      #btn-repeat,
+      #btn-devices {
+        position: absolute;
+        z-index: 8;
+        appearance: none;
+        -webkit-appearance: none;
+        font: inherit;
+        font-size: 10px;
+        font-weight: 700;
+        letter-spacing: 0.04em;
+        padding: 0;
+        border-radius: 999px;
+        background: rgba(6, 22, 0, 0.7);
+        border: 1px solid hsla(var(--theme-hue), 65%, 55%, 0.4);
+        color: hsla(var(--theme-hue), 75%, 81%, 0.85);
+        cursor: pointer;
+        text-align: center;
+        transition: background 120ms, border-color 120ms, color 120ms;
+      }
+      #btn-like {
+        left: calc(var(--head-x) + 99px);
+        top: 196px;
+        width: 36px;
+        height: 14px;
+        line-height: 12px;
+        font-size: 11px;
+      }
+      #btn-like.active {
+        color: hsl(350, 82%, 68%);
+        border-color: hsla(350, 70%, 58%, 0.85);
+        background: rgba(90, 16, 28, 0.55);
+        box-shadow: 0 0 6px hsla(350, 80%, 50%, 0.35);
+      }
+      #btn-shuffle {
+        left: calc(var(--head-x) + 8px);
+        top: 223px;
+        width: 28px;
+        height: 10px;
+        font-size: 9px;
+        line-height: 8px;
+      }
+      #btn-repeat {
+        left: calc(var(--head-x) + 198px);
+        top: 223px;
+        width: 28px;
+        height: 10px;
+        font-size: 9px;
+        line-height: 8px;
+      }
+      #btn-devices {
+        left: calc(var(--head-x) + 64px);
+        top: 196px;
+        width: 16px;
+        height: 14px;
+        font-size: 8px;
+        line-height: 12px;
+      }
+      #btn-like:hover,
+      #btn-shuffle:hover,
+      #btn-repeat:hover,
+      #btn-devices:hover {
+        background: rgba(40, 95, 3, 0.85);
+        border-color: hsla(var(--theme-hue), 75%, 70%, 0.85);
+      }
+      #btn-shuffle.active,
+      #btn-repeat.active,
+      #btn-devices.active {
+        background: hsla(var(--theme-hue), 70%, 28%, 0.55);
+        border-color: hsla(var(--theme-hue), 80%, 67%, 0.85);
+        color: hsl(var(--theme-hue), 80%, 88%);
+      }
+      #btn-like:disabled {
+        opacity: 0.35;
+        cursor: default;
+      }
+
+      #device-menu {
+        position: absolute;
+        z-index: 40;
+        min-width: 160px;
+        display: none;
+        padding: 4px 0;
+        background: rgba(6, 16, 2, 0.94);
+        border: 1px solid hsla(var(--theme-hue), 70%, 50%, 0.45);
+        border-radius: 4px;
+        box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+        color: var(--skin-text);
+        font-size: 10px;
+      }
+      #device-menu.show {
+        display: block;
+      }
+
+      .lb-tab-icon[data-tab="top"]::before {
+        left: 2px;
+        top: 7px;
+        width: 9px;
+        height: 5px;
+        background: currentColor;
+        clip-path: polygon(0 100%, 20% 40%, 40% 70%, 60% 20%, 80% 55%, 100% 0, 100% 100%);
+      }
+      .lb-tab-icon[data-tab="top"]::after {
+        left: 1px;
+        top: 1px;
+        width: 11px;
+        height: 2px;
+        background: currentColor;
+        box-shadow: 0 11px 0 currentColor;
+      }
+
       /* === Lyrics overlay (covers viz when enabled) ==================== */
       #lyrics-overlay {
         position: absolute;

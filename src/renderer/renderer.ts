@@ -35,6 +35,9 @@ import {
 import { ThemeCycler } from "./theme-cycler";
 import { MiniMode } from "./mini-mode";
 import { flashVisLabel } from "./vis-label";
+import { wireLikeButton } from "./like-button";
+import { wirePlaybackChrome } from "./playback-chrome";
+import { wireSeekBar } from "./seek-bar";
 
 function wireKeys(controller: SpotifyController, faceAlive?: FaceAlive): void {
   const faceAliveDebugEnabled =
@@ -121,6 +124,7 @@ function setupQueueDrawerStub() {
   // from any visible UI — discoverable only by playing with it.
   const faceAlive = new FaceAlive();
   window.__faceAlive = faceAlive.getDebugApi();
+  faceAlive.restorePersisted();
   const NOSE_CLICK_WINDOW_MS = 2000;
   let noseClicks = 0;
   let noseClickResetTimer: number | null = null;
@@ -236,9 +240,20 @@ function setupQueueDrawerStub() {
   const queueView = new QueueView(document.getElementById("queue-view")!, controller);
   const lyrics = new LyricsPanel(controller);
   const status = new StatusOverlay();
+  const seek = wireSeekBar(controller, status);
 
   wireVisMenu(viz, milkdrop);
-  wireNowPlaying({ controller, viz, faceAlive, queueView, lyrics, theme });
+  wireLikeButton(controller, status, faceAlive);
+  wirePlaybackChrome(controller, status);
+  wireNowPlaying({
+    controller,
+    viz,
+    faceAlive,
+    queueView,
+    lyrics,
+    theme,
+    isScrubbing: seek.isScrubbing,
+  });
 
   const renderSpotifySettings = createSettingsRenderer({
     controller,
@@ -256,8 +271,10 @@ function setupQueueDrawerStub() {
         void status.runPlaybackCommand(controller, "Pause", () => controller.togglePlay());
       } else if (btn === "next") {
         void status.runPlaybackCommand(controller, "Next", () => controller.next());
+        faceAlive.notifySkip(1);
       } else if (btn === "prev") {
         void status.runPlaybackCommand(controller, "Previous", () => controller.previous());
+        faceAlive.notifySkip(-1);
       } else if (btn === "vis") {
         const next = viz.cycleMode();
         flashVisLabel(Visualizer.labelFor(next));
@@ -317,16 +334,6 @@ function setupQueueDrawerStub() {
     if (can) liveAudio.setPan(balanceSlider.getValue());
   }
   refreshBalanceAvailability();
-
-  const seek = document.getElementById("seek-track")!;
-  seek.addEventListener("click", (e) => {
-    const r = seek.getBoundingClientRect();
-    const pct = (e.clientX - r.left) / r.width;
-    const dur = controller.state().durationMs;
-    if (dur > 0) {
-      void status.runPlaybackCommand(controller, "Seek", () => controller.seek(pct * dur));
-    }
-  });
 
   let initialized = false;
 

@@ -5,6 +5,7 @@ import type {
   HeadspaceApi,
   LyricsRequest,
   LyricsResult,
+  RepeatState,
   SpotifyPlayOpts,
 } from "../shared/ipc-api";
 
@@ -16,6 +17,7 @@ const api = {
   dragStart: (dx: number, dy: number) => ipcRenderer.send("drag:start", dx, dy),
   dragEnd: () => ipcRenderer.send("drag:end"),
   toggleOnTop: () => ipcRenderer.send("window:toggle-on-top"),
+  isFaceTest: () => process.env.HEADSPACE_FACE_TEST === "1",
 
   // Global cursor tracking for alive-mode eyes. While enabled, main polls the
   // OS cursor position (works anywhere on screen, even off the window) and
@@ -57,6 +59,8 @@ const api = {
   spPlaylists: (offset: number, limit: number) =>
     ipcRenderer.invoke("sp:playlists", offset, limit),
   spRecent: (limit: number) => ipcRenderer.invoke("sp:recent", limit),
+  spTop: (offset: number, limit: number) =>
+    ipcRenderer.invoke("sp:top", offset, limit),
   spSearch: (query: string, limit: number) =>
     ipcRenderer.invoke("sp:search", query, limit),
   spPlaylistTracks: (playlistId: string, offset: number, limit: number) =>
@@ -77,6 +81,13 @@ const api = {
   spAddQueue: (uri: string, deviceId?: string) =>
     ipcRenderer.invoke("sp:add-queue", uri, deviceId),
   spAnalysis: (trackId: string) => ipcRenderer.invoke("sp:analysis", trackId),
+  spLikedContains: (ids: string[]) => ipcRenderer.invoke("sp:liked-contains", ids),
+  spSaveTracks: (ids: string[]) => ipcRenderer.invoke("sp:save-tracks", ids),
+  spUnsaveTracks: (ids: string[]) => ipcRenderer.invoke("sp:unsave-tracks", ids),
+  spShuffle: (state: boolean, deviceId?: string) =>
+    ipcRenderer.invoke("sp:shuffle", state, deviceId),
+  spRepeat: (state: RepeatState, deviceId?: string) =>
+    ipcRenderer.invoke("sp:repeat", state, deviceId),
   systemDiag: () => ipcRenderer.invoke("system:diag"),
   systemResetWidevine: () => ipcRenderer.invoke("system:reset-widevine"),
 } satisfies HeadspaceApi;

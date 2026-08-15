@@ -20,8 +20,9 @@ export function wireNowPlaying(opts: {
   queueView: QueueView;
   lyrics: LyricsPanel;
   theme: ThemeCycler;
+  isScrubbing?: () => boolean;
 }): void {
-  const { controller, viz, faceAlive, queueView, lyrics, theme } = opts;
+  const { controller, viz, faceAlive, queueView, lyrics, theme, isScrubbing } = opts;
   const nowPlaying = document.getElementById("now-playing")!;
   const leftNowView = document.getElementById("left-now-view")!;
   const pauseOverlay = document.getElementById("pause-overlay")!;
@@ -118,6 +119,7 @@ export function wireNowPlaying(opts: {
       if (s.isPlaying) pauseOverlay.removeAttribute("hidden");
       else pauseOverlay.setAttribute("hidden", "");
     }
+    if (isScrubbing?.()) return;
     if (s.durationMs > 0) {
       seekFill.style.width = `${Math.min(100, (s.positionMs / s.durationMs) * 100)}%`;
     } else {

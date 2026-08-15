@@ -20,6 +20,7 @@
 import type { LiveAudio } from "./live-audio";
 import { AliveEyeRig, type EyeDrawState } from "./face-alive-eyes";
 import { SpeakerRig, type BandLevels } from "./speaker-cones";
+import { STORAGE_KEYS } from "./storage-keys";
 
 export const NOSE_CLICKS_REQUIRED = 5;
 
@@ -142,6 +143,11 @@ const DROP_CONSTRICT_SCALE = 0.58;
 const DROWSE_AFTER_PAUSE_MS = 30_000;
 const DROWSE_RAMP_MS = 18_000;
 const DROWSE_WAKE_MS = 1_300;
+const YAWN_AT_DROWSE = 0.38;
+const SLEEP_AT_DROWSE = 0.92;
+const YAWN_CLOSE_MS = 220;
+const YAWN_HOLD_MS = 480;
+const YAWN_OPEN_MS = 340;
 
 const INITIAL_STATE: FaceAliveEyeState = {
   leftOpenness: BLINK_MIN_OPENNESS,
@@ -232,6 +238,9 @@ export class FaceAlive {
   private coneTestHoldUntil = 0; // test-only: hold pumped cone excursion
   private globalTracking = false; // main is polling the OS cursor for us
   private cursorUnsub: (() => void) | null = null;
+  private yawnedThisCycle = false;
+  private sleeping = false;
+  private yawn: { startAt: number } | null = null;
 
   constructor() {
     // Transform the wrapper (head + eyes) so eyes stay pinned to the face
@@ -282,6 +291,9 @@ export class FaceAlive {
     this.isPlaying = playing;
     if (playing) {
       this.everPlayed = true;
+      this.sleeping = false;
+      this.yawnedThisCycle = false;
+      this.yawn = null;
       if (this.active && this.drowse > 0.45) this.startWakeScript(performance.now());
     } else {
       this.pausedAt = performance.now();
@@ -303,6 +315,35 @@ export class FaceAlive {
         { at: 1180, x: 0, y: 0.5 },
       ],
     };
+  }
+
+  /** Liked the track — a pleased squint and a little bounce. */
+  notifyLiked() {
+    if (!this.active || this.sleeping) return;
+    const now = performance.now();
+    this.squintUntil = now + 700;
+    this.headJerkVel += 1.1;
+    this.startBlink(now, 0, true);
+  }
+
+  /** Skip / previous — glance in the direction the queue moved. */
+  notifySkip(dir: 1 | -1) {
+    if (!this.active || this.drowse > 0.3 || this.script) return;
+    const now = performance.now();
+    this.script = {
+      startedAt: now,
+      durationMs: 720,
+      steps: [
+        { at: 80, x: 7.2 * dir, y: -1.4 },
+        { at: 420, x: 0, y: 0.3 },
+      ],
+    };
+  }
+
+  /** Restore last session's alive toggle. Tests never persist or restore. */
+  restorePersisted() {
+    if (window.headspace.isFaceTest()) return;
+    if (localStorage.getItem(STORAGE_KEYS.faceAlive) === "1") this.activate();
   }
 
   /** Nose poke while alive: blink, glance at the offender, brief squint. */
@@ -382,6 +423,7 @@ export class FaceAlive {
     this.startWakeScript(now);
     this.startCursorTracking();
     document.body.classList.add("face-alive");
+    this.persistAlive();
     if (this.rafHandle === null) {
       this.rafHandle = requestAnimationFrame(this.tick);
     }
@@ -422,6 +464,12 @@ export class FaceAlive {
     this.speakers?.reset();
     this.clearDebugOverlay();
     this.lastState = { ...INITIAL_STATE };
+    this.persistAlive();
+  }
+
+  private persistAlive() {
+    if (window.headspace.isFaceTest()) return;
+    localStorage.setItem(STORAGE_KEYS.faceAlive, this.active ? "1" : "0");
   }
 
   toggle() {
@@ -633,10 +681,21 @@ export class FaceAlive {
   private updateDrowse(now: number, dtMs: number) {
     if (this.isPlaying || !this.everPlayed) {
       this.drowse = Math.max(0, this.drowse - dtMs / DROWSE_WAKE_MS);
+      if (this.drowse < 0.2) {
+        this.sleeping = false;
+        this.yawnedThisCycle = false;
+      }
       return;
     }
     if (now - this.pausedAt > DROWSE_AFTER_PAUSE_MS) {
+      const prev = this.drowse;
       this.drowse = Math.min(1, this.drowse + dtMs / DROWSE_RAMP_MS);
+      if (!this.yawnedThisCycle && prev < YAWN_AT_DROWSE && this.drowse >= YAWN_AT_DROWSE) {
+        this.yawnedThisCycle = true;
+        this.yawn = { startAt: now };
+        this.blink = null;
+      }
+      if (this.drowse >= SLEEP_AT_DROWSE) this.sleeping = true;
     }
   }
 
@@ -681,6 +740,31 @@ export class FaceAlive {
     const wakeOpen = BLINK_MIN_OPENNESS + easeOutCubic(wakeT) * (1 - BLINK_MIN_OPENNESS);
     if (wakeT < 1) {
       this.openness = wakeOpen;
+      return this.openness;
+    }
+
+    if (this.yawn) {
+      const age = now - this.yawn.startAt;
+      const total = YAWN_CLOSE_MS + YAWN_HOLD_MS + YAWN_OPEN_MS;
+      if (age < YAWN_CLOSE_MS) {
+        this.openness = lerp(1, BLINK_MIN_OPENNESS, clamp01(age / YAWN_CLOSE_MS));
+        return this.openness;
+      }
+      if (age < YAWN_CLOSE_MS + YAWN_HOLD_MS) {
+        this.openness = BLINK_MIN_OPENNESS;
+        return this.openness;
+      }
+      if (age < total) {
+        const t = (age - YAWN_CLOSE_MS - YAWN_HOLD_MS) / YAWN_OPEN_MS;
+        this.openness = lerp(BLINK_MIN_OPENNESS, 1, clamp01(t));
+        return this.openness;
+      }
+      this.yawn = null;
+    }
+
+    if (this.sleeping && now >= this.stirUntil) {
+      this.blink = null;
+      this.openness = BLINK_MIN_OPENNESS;
       return this.openness;
     }
 

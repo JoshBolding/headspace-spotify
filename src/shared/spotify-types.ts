@@ -87,13 +87,15 @@ export interface PlaybackDevice {
   volume_percent?: number;
 }
 
+export type RepeatState = "off" | "track" | "context";
+
 export interface PlaybackState {
   is_playing: boolean;
   progress_ms: number;
   device?: PlaybackDevice;
   item?: SpotifyTrack;
   shuffle_state?: boolean;
-  repeat_state?: "off" | "track" | "context";
+  repeat_state?: RepeatState;
 }
 
 export interface AuthStatus {

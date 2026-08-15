@@ -2,10 +2,14 @@ import {
   app,
   BrowserWindow,
   desktopCapturer,
+  globalShortcut,
   ipcMain,
+  Menu,
+  nativeImage,
   screen,
   session,
   shell,
+  Tray,
 } from "electron";
 
 // Allow audio playback without a user gesture per call. Spotify Web Playback
@@ -58,6 +62,7 @@ const VIEW_W_OPENED = 760;
 const VIEW_H = 394;
 
 let win: BrowserWindow | null = null;
+let tray: Tray | null = null;
 
 function createWindow() {
   win = new BrowserWindow({
@@ -245,6 +250,7 @@ function createWindow() {
   ipcMain.handle("sp:liked", wrap(Sp.getLikedTracks));
   ipcMain.handle("sp:playlists", wrap(Sp.getMyPlaylists));
   ipcMain.handle("sp:recent", wrap(Sp.getRecentlyPlayed));
+  ipcMain.handle("sp:top", wrap(Sp.getTopTracks));
   ipcMain.handle("sp:search", wrap(Sp.searchTracks));
   ipcMain.handle("sp:playlist-tracks", wrap(Sp.getPlaylistTracks));
   ipcMain.handle("sp:devices", wrap(Sp.getDevices));
@@ -259,6 +265,11 @@ function createWindow() {
   ipcMain.handle("sp:queue", wrap(Sp.getQueue));
   ipcMain.handle("sp:add-queue", wrap(Sp.addToQueue));
   ipcMain.handle("sp:analysis", wrap(Sp.getAudioAnalysis));
+  ipcMain.handle("sp:liked-contains", wrap(Sp.tracksAreSaved));
+  ipcMain.handle("sp:save-tracks", wrap(Sp.saveTracks));
+  ipcMain.handle("sp:unsave-tracks", wrap(Sp.removeSavedTracks));
+  ipcMain.handle("sp:shuffle", wrap(Sp.setShuffle));
+  ipcMain.handle("sp:repeat", wrap(Sp.setRepeat));
 
   ipcMain.handle("lyrics:get", async (_evt, req: LyricsRequest) => {
     return getLyrics(req);
@@ -418,9 +429,84 @@ function createWindow() {
     return true;
   });
 
+  win.on("close", (e) => {
+    // Skin X / Esc hide to the tray so media keys keep working. Tests and
+    // an explicit Quit still tear the process down.
+    if (process.env.HEADSPACE_FACE_TEST === "1" || allowQuit) return;
+    e.preventDefault();
+    win?.hide();
+  });
+
   win.on("closed", () => {
     win = null;
   });
+
+  setupTrayAndHotkeys();
+}
+
+let allowQuit = false;
+
+async function runMediaCommand(cmd: "toggle" | "next" | "prev"): Promise<void> {
+  try {
+    if (cmd === "next") {
+      await Sp.nextTrack();
+      return;
+    }
+    if (cmd === "prev") {
+      await Sp.previousTrack();
+      return;
+    }
+    const state = await Sp.getPlaybackState();
+    if (state?.is_playing) await Sp.pause();
+    else await Sp.play({});
+  } catch (err) {
+    console.warn("[headspace] media command failed:", cmd, err);
+  }
+}
+
+function setupTrayAndHotkeys(): void {
+  if (process.env.HEADSPACE_FACE_TEST === "1") return;
+  if (tray) return;
+
+  const iconPath = join(app.getAppPath(), "assets", "converted", "head.png");
+  const icon = nativeImage.createFromPath(iconPath);
+  tray = new Tray(icon.isEmpty() ? nativeImage.createEmpty() : icon.resize({ width: 16, height: 16 }));
+  tray.setToolTip("Headspace");
+  tray.setContextMenu(
+    Menu.buildFromTemplate([
+      {
+        label: "Show",
+        click: () => {
+          win?.show();
+          win?.focus();
+        },
+      },
+      { type: "separator" },
+      { label: "Play / Pause", click: () => void runMediaCommand("toggle") },
+      { label: "Next", click: () => void runMediaCommand("next") },
+      { label: "Previous", click: () => void runMediaCommand("prev") },
+      { type: "separator" },
+      { label: "Quit", click: () => app.quit() },
+    ]),
+  );
+  tray.on("double-click", () => {
+    win?.show();
+    win?.focus();
+  });
+
+  const bind = (accel: string, cmd: "toggle" | "next" | "prev") => {
+    try {
+      globalShortcut.register(accel, () => void runMediaCommand(cmd));
+    } catch {
+      /* already claimed by another app */
+    }
+  };
+  bind("MediaPlayPause", "toggle");
+  bind("MediaNextTrack", "next");
+  bind("MediaPreviousTrack", "prev");
+  bind("CommandOrControl+Alt+P", "toggle");
+  bind("CommandOrControl+Alt+Right", "next");
+  bind("CommandOrControl+Alt+Left", "prev");
 }
 
 async function loadWidevine(): Promise<void> {
@@ -498,6 +584,13 @@ app.whenReady().then(async () => {
 });
 
 let lastComponentsStatus: unknown = null;
+
+app.on("before-quit", () => {
+  allowQuit = true;
+  globalShortcut.unregisterAll();
+  tray?.destroy();
+  tray = null;
+});
 
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();

@@ -10,7 +10,7 @@ import type { SpotifyController } from "./spotify-player";
 import type { LibraryItem as SpotifyLibraryItem } from "../shared/spotify-types";
 import { isErrorResult } from "../shared/spotify-types";
 
-type Tab = "search" | "liked" | "playlists" | "recent" | "settings";
+type Tab = "search" | "liked" | "playlists" | "recent" | "top" | "settings";
 
 interface LibraryItem {
   kind: "track" | "playlist";
@@ -30,12 +30,13 @@ interface LibraryPageResponse {
   next?: boolean;
 }
 
-const TAB_ORDER: Tab[] = ["search", "liked", "playlists", "recent"];
+const TAB_ORDER: Tab[] = ["search", "liked", "playlists", "recent", "top"];
 const TAB_TITLES: Record<Tab, string> = {
   search: "Search",
   liked: "Liked",
   playlists: "Playlists",
   recent: "Recent",
+  top: "Top",
   settings: "Settings",
 };
 
@@ -157,6 +158,8 @@ export class LibraryBrowser {
       result = await window.headspace.spPlaylists(offset, this.pageLimit);
     } else if (tab === "recent") {
       result = await window.headspace.spRecent(50);
+    } else if (tab === "top") {
+      result = await window.headspace.spTop(offset, this.pageLimit);
     }
     this.isLoading = false;
     this.isAppending = false;

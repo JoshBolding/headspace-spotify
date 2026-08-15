@@ -11,9 +11,12 @@ import type {
   PlaybackDevice,
   PlaybackState,
   QueueResponse,
+  RepeatState,
   Result,
   SpotifyUser,
 } from "./spotify-types";
+
+export type { RepeatState };
 
 export type { AuthStatus, Result } from "./spotify-types";
 
@@ -84,6 +87,7 @@ export interface HeadspaceApi {
   dragStart: (dx: number, dy: number) => void;
   dragEnd: () => void;
   toggleOnTop: () => void;
+  isFaceTest: () => boolean;
 
   setAliveCursorTracking: (on: boolean) => void;
   onAliveCursor: (cb: (pos: { x: number; y: number }) => void) => () => void;
@@ -103,6 +107,7 @@ export interface HeadspaceApi {
   spLiked: (offset: number, limit: number) => Promise<Result<PagedLibrary>>;
   spPlaylists: (offset: number, limit: number) => Promise<Result<PagedLibrary>>;
   spRecent: (limit: number) => Promise<Result<PagedLibrary>>;
+  spTop: (offset: number, limit: number) => Promise<Result<PagedLibrary>>;
   spSearch: (query: string, limit: number) => Promise<Result<PagedLibrary>>;
   spPlaylistTracks: (
     playlistId: string,
@@ -121,6 +126,11 @@ export interface HeadspaceApi {
   spQueue: () => Promise<Result<QueueResponse>>;
   spAddQueue: (uri: string, deviceId?: string) => Promise<Result<void>>;
   spAnalysis: (trackId: string) => Promise<Result<AudioAnalysis>>;
+  spLikedContains: (ids: string[]) => Promise<Result<boolean[]>>;
+  spSaveTracks: (ids: string[]) => Promise<Result<void>>;
+  spUnsaveTracks: (ids: string[]) => Promise<Result<void>>;
+  spShuffle: (state: boolean, deviceId?: string) => Promise<Result<void>>;
+  spRepeat: (state: RepeatState, deviceId?: string) => Promise<Result<void>>;
 
   systemDiag: () => Promise<SystemDiag>;
   systemResetWidevine: () => Promise<WidevineResetResult>;
