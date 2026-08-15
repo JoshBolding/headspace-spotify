@@ -24,6 +24,8 @@ jobs:
         run: npm test
         env:
           HEADSPACE_FACE_TEST: "1"
+          # Organic blink sampling is skipped on CI (rAF is throttled).
+          # The smoke test still launches Electron and toggles alive mode.
       - name: Upload failure artifacts
         if: failure()
         uses: actions/upload-artifact@v4
