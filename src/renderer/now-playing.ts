@@ -21,8 +21,9 @@ export function wireNowPlaying(opts: {
   lyrics: LyricsPanel;
   theme: ThemeCycler;
   isScrubbing?: () => boolean;
+  onPlaying?: (playing: boolean) => void;
 }): void {
-  const { controller, viz, faceAlive, queueView, lyrics, theme, isScrubbing } = opts;
+  const { controller, viz, faceAlive, queueView, lyrics, theme, isScrubbing, onPlaying } = opts;
   const nowPlaying = document.getElementById("now-playing")!;
   const leftNowView = document.getElementById("left-now-view")!;
   const pauseOverlay = document.getElementById("pause-overlay")!;
@@ -118,6 +119,7 @@ export function wireNowPlaying(opts: {
       lastIsPlaying = s.isPlaying;
       if (s.isPlaying) pauseOverlay.removeAttribute("hidden");
       else pauseOverlay.setAttribute("hidden", "");
+      onPlaying?.(s.isPlaying);
     }
     if (isScrubbing?.()) return;
     if (s.durationMs > 0) {

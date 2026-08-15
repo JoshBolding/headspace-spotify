@@ -35,6 +35,7 @@ import {
 import { ThemeCycler } from "./theme-cycler";
 import { MiniMode } from "./mini-mode";
 import { flashVisLabel } from "./vis-label";
+import { getVizAudioMode } from "./viz-audio-pref";
 import { wireLikeButton } from "./like-button";
 import { wirePlaybackChrome } from "./playback-chrome";
 import { wireSeekBar } from "./seek-bar";
@@ -152,34 +153,40 @@ function setupQueueDrawerStub() {
   });
 
   /**
-   * Try the cheap audio-element tap first; if blocked by DRM (almost always),
-   * fall through to WASAPI loopback via desktopCapturer. Both are gestureless
-   * so this can run automatically on SDK ready.
+   * Default is Spotify-only: tap the in-app <audio> element. Loopback hears
+   * YouTube/Discord/everything, so it stays opt-in (right-click vis → Audio).
    */
   async function tryEnableLiveAudio(): Promise<void> {
-    if (liveAudio.getSource()) return;
-    await new Promise((r) => setTimeout(r, 1500));
+    const wantSystem = getVizAudioMode() === "system";
+    const have = liveAudio.getSource();
+    if (have === "tap") return;
+    if (have === "loopback" && wantSystem) return;
+    if (have === "loopback" && !wantSystem) {
+      liveAudio.stop();
+      viz.setLiveAudio(null);
+      faceAlive.setLiveAudio(null);
+    }
     if (await liveAudio.tryTap()) {
       viz.setLiveAudio(liveAudio);
       faceAlive.setLiveAudio(liveAudio);
       refreshBalanceAvailability();
       void milkdrop.applyVisModeUI(viz.getMode());
-      console.log("[viz] live audio: tap succeeded");
+      console.log("[viz] live audio: Spotify tap");
       return;
     }
-    if (await liveAudio.tryLoopback()) {
+    if (wantSystem && (await liveAudio.tryLoopback())) {
       viz.setLiveAudio(liveAudio);
       faceAlive.setLiveAudio(liveAudio);
       refreshBalanceAvailability();
       void milkdrop.applyVisModeUI(viz.getMode());
-      console.log(
-        "[viz] live audio: loopback active (capturing system audio — captures ALL audio, not just Spotify)",
-      );
+      console.log("[viz] live audio: system mix (all apps)");
       return;
     }
     refreshBalanceAvailability();
     console.warn(
-      "[viz] no live audio source available — falling back to synthetic 120 BPM analysis. Press Ctrl+L to retry.",
+      wantSystem
+        ? "[viz] no live audio — synthetic fallback. Ctrl+L to retry."
+        : "[viz] Spotify-only mode: in-app tap silent (DRM) or Connect playback. Right-click vis → Audio → All system audio if you want the Windows mix.",
     );
   }
 
@@ -242,7 +249,9 @@ function setupQueueDrawerStub() {
   const status = new StatusOverlay();
   const seek = wireSeekBar(controller, status);
 
-  wireVisMenu(viz, milkdrop);
+  wireVisMenu(viz, milkdrop, () => {
+    void reconnectLiveAudio();
+  });
   wireLikeButton(controller, status, faceAlive);
   wirePlaybackChrome(controller, status);
   wireNowPlaying({
@@ -253,6 +262,9 @@ function setupQueueDrawerStub() {
     lyrics,
     theme,
     isScrubbing: seek.isScrubbing,
+    onPlaying: (playing) => {
+      if (playing && !liveAudio.getSource()) void tryEnableLiveAudio();
+    },
   });
 
   const renderSpotifySettings = createSettingsRenderer({

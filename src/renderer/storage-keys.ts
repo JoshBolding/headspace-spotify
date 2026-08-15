@@ -11,6 +11,7 @@ export const STORAGE_KEYS = {
   volume: "headspace.spotify.volume",
   balance: "headspace.spotify.balance",
   vizMode: "headspace.spotify.viz-mode",
+  vizAudio: "headspace.spotify.viz-audio",
   faceAlive: "headspace.spotify.face-alive",
 } as const;
 

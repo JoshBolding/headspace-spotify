@@ -7,8 +7,13 @@ import { Visualizer, type VisMode } from "./visualizer";
 import type { MilkdropDriver } from "./milkdrop-driver";
 import { MILKDROP_CYCLE_OPTIONS } from "./milkdrop-driver";
 import { flashVisLabel } from "./vis-label";
+import { getVizAudioMode, setVizAudioMode, vizAudioLabel } from "./viz-audio-pref";
 
-export function wireVisMenu(viz: Visualizer, milkdrop: MilkdropDriver): void {
+export function wireVisMenu(
+  viz: Visualizer,
+  milkdrop: MilkdropDriver,
+  onAudioModeChange?: () => void,
+): void {
   const visHit = document.getElementById("vis-hit")!;
   const visMenu = document.getElementById("vis-context-menu")!;
   let visMenuOpen = false;
@@ -69,6 +74,16 @@ export function wireVisMenu(viz: Visualizer, milkdrop: MilkdropDriver): void {
     };
 
     addHead(`Visualizer · ${Visualizer.labelFor(mode)}`);
+    addItem("Audio", {
+      val: vizAudioLabel(),
+      keepOpen: true,
+      action: () => {
+        const next = getVizAudioMode() === "system" ? "spotify" : "system";
+        setVizAudioMode(next);
+        flashVisLabel(vizAudioLabel(next));
+        onAudioModeChange?.();
+      },
+    });
     if (mode === "milkdrop") {
       if (milkdrop.bcViz.isReady()) {
         addHead(milkdrop.bcViz.currentPresetName());
