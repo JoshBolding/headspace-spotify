@@ -75,6 +75,7 @@ function createWindow() {
     hasShadow: false,
     alwaysOnTop: true,
     skipTaskbar: false,
+    title: "Headspace Spotify",
     backgroundColor: "#00000000",
     webPreferences: {
       preload: join(__dirname, "preload.js"),
@@ -91,6 +92,7 @@ function createWindow() {
     Math.round(primary.x + (primary.width - VIEW_W_CLOSED) / 2),
     Math.round(primary.y + (primary.height - VIEW_H) / 2),
   );
+  win.setAlwaysOnTop(true, "screen-saver");
   win.show();
   win.focus();
   win.moveTop();
@@ -112,20 +114,11 @@ function createWindow() {
   let lastDragPos: { x: number; y: number } | null = null;
   let aliveCursorTimer: NodeJS.Timeout | null = null;
 
-  // Alpha-aware click-through: renderer sends us hit-test results per pointer move.
-  // True = forward clicks to whatever is behind; false = window receives clicks normally.
-  ipcMain.on("hit-test", (_evt, isOverOpaque: boolean) => {
-    if (!win) return;
-    if (isDragging) return;
-    // Never click-through the whole window on first paint — that combination
-    // of transparent + ignore-mouse has been making the head vanish after
-    // 2–3s on this machine. Only punch through when we know the cursor is
-    // off the opaque skin.
-    try {
-      win.setIgnoreMouseEvents(!isOverOpaque, { forward: true });
-    } catch {
-      /* ignore */
-    }
+  // Renderer still sends hit-test, but we must not call setIgnoreMouseEvents
+  // on this transparent frameless window — that combination stops Chromium
+  // compositing after the first event, so the head paints for 2–3s then vanishes.
+  ipcMain.on("hit-test", (_evt, _isOverOpaque: boolean) => {
+    /* keep the window fully interactive */
   });
 
   ipcMain.on("window:minimize", () => win?.minimize());
