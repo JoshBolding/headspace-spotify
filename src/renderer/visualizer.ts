@@ -131,10 +131,14 @@ export class Visualizer {
   private flashAt = 0;
   private barFlashIntensity = 0;
 
-  // Scrolling spectrogram buffer — one offscreen canvas, blit + shift each
-  // frame. Avoids re-rendering the full history per frame.
-  private spectroCanvas: HTMLCanvasElement | null = null;
-  private spectroCtx: CanvasRenderingContext2D | null = null;
+  // Scrolling spectrogram as a persistent ImageData: one column write + one
+  // putImageData per frame, no 175 fillRect calls.
+  private spectroData: ImageData | null = null;
+
+  // rAF gating: keep the ticker alive so we can resume without restarting,
+  // but skip draw() when paused, hidden, or nothing is decaying.
+  private dirty = true;
+  private rafHandle: number | null = null;
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
@@ -152,6 +156,7 @@ export class Visualizer {
     if (!url) {
       this.artImg = null;
       this.artLoaded = false;
+      this.dirty = true;
       return;
     }
     const img = new Image();
@@ -159,6 +164,7 @@ export class Visualizer {
     img.onload = () => {
       this.artImg = img;
       this.artLoaded = true;
+      this.dirty = true;
     };
     img.src = url;
   }
@@ -171,14 +177,14 @@ export class Visualizer {
     this.peaks = [];
     this.particles = [];
     this.rings = [];
-    if (this.spectroCtx && this.spectroCanvas) {
-      this.spectroCtx.clearRect(0, 0, this.spectroCanvas.width, this.spectroCanvas.height);
-    }
+    this.spectroData?.data.fill(0);
+    this.dirty = true;
   }
 
   /** Attach a live FFT source. When set, takes precedence over Analysis data. */
   setLiveAudio(la: LiveAudio | null) {
     this.liveAudio = la;
+    this.dirty = true;
   }
 
   /** Set the active color palette (typically extracted from album art). */
@@ -189,20 +195,31 @@ export class Visualizer {
       secondary: parseRgb(p.secondary),
       highlight: parseRgb(p.highlight),
     };
+    this.dirty = true;
   }
 
   setPlaying(playing: boolean) {
+    if (playing === this.isPlaying) return;
     this.isPlaying = playing;
+    this.dirty = true;
   }
 
   setPosition(ms: number) {
+    const prev = this.positionMs;
     this.positionMs = ms;
+    // A jump bigger than a couple of ticks is a seek/skip. Snap the beat
+    // cursor so we don't fire every intermediate beat as a fake drop.
+    if (Math.abs(ms - prev) > 400) {
+      this.resyncBeatIndex(ms / 1000);
+      this.dirty = true;
+    }
   }
 
   setMode(mode: VisMode) {
     if (!VIS_MODES.includes(mode)) return;
     this.mode = mode;
     localStorage.setItem(STORAGE_KEYS.vizMode, mode);
+    this.dirty = true;
   }
 
   cycleMode(): VisMode {
@@ -223,11 +240,33 @@ export class Visualizer {
   // -------- render loop --------
 
   private startLoop() {
+    document.addEventListener("visibilitychange", () => {
+      if (!document.hidden) this.dirty = true;
+    });
     const tick = () => {
-      this.draw();
-      requestAnimationFrame(tick);
+      this.rafHandle = requestAnimationFrame(tick);
+      if (this.shouldDraw()) this.draw();
     };
-    requestAnimationFrame(tick);
+    this.rafHandle = requestAnimationFrame(tick);
+  }
+
+  /** Draw when playing, when effects are still decaying, or once after a state poke. */
+  private shouldDraw(): boolean {
+    if (document.hidden) return false;
+    if (this.mode === "milkdrop") {
+      if (!this.dirty) return false;
+      this.dirty = false;
+      return true;
+    }
+    if (this.isPlaying) return true;
+    if (this.barFlashIntensity > 0.02) return true;
+    if (this.particles.length > 0) return true;
+    if (this.rings.length > 0) return true;
+    if (this.dirty) {
+      this.dirty = false;
+      return true;
+    }
+    return false;
   }
 
   private draw() {
@@ -558,43 +597,39 @@ export class Visualizer {
   // -------- mode: spectro (scrolling waterfall) --------
 
   private drawSpectro(fft: Uint8Array | null) {
-    const g = this.ctx;
-    if (!this.spectroCanvas) {
-      this.spectroCanvas = document.createElement("canvas");
-      this.spectroCanvas.width = W;
-      this.spectroCanvas.height = H;
-      this.spectroCtx = this.spectroCanvas.getContext("2d");
+    if (!this.spectroData) this.spectroData = new ImageData(W, H);
+    const data = this.spectroData.data;
+    // Shift history one pixel left. copyWithin per row beats 175 fillRects.
+    for (let y = 0; y < H; y++) {
+      const row = y * W * 4;
+      data.copyWithin(row, row + 4, row + W * 4);
     }
-    const sc = this.spectroCtx!;
-    const buf = this.spectroCanvas!;
-    // Shift one column left, exposing the right column to draw the new slice.
-    sc.drawImage(buf, -1, 0);
-    sc.clearRect(W - 1, 0, 1, H);
 
+    const pri = this.paletteRgb.primary;
+    const sec = this.paletteRgb.secondary;
     if (fft) {
-      const pri = this.paletteRgb.primary;
-      const sec = this.paletteRgb.secondary;
-      // Use the lower 60% of bins, log-mapped onto H. Color = secondary→primary
-      // gradient by magnitude, with brightness = magnitude.
       const usable = Math.floor(fft.length * 0.6);
       for (let y = 0; y < H; y++) {
-        // Bottom of screen = bass, top = treble.
         const t = 1 - y / H;
-        const bin = Math.floor(Math.pow(t, 1.7) * usable);
-        const m = fft[bin] / 255;
-        const r = Math.floor(sec[0] + (pri[0] - sec[0]) * m);
-        const gC = Math.floor(sec[1] + (pri[1] - sec[1]) * m);
-        const b = Math.floor(sec[2] + (pri[2] - sec[2]) * m);
-        // Multiply by m for brightness so quiet bins fade toward black.
-        sc.fillStyle = `rgba(${r}, ${gC}, ${b}, ${0.15 + m * 0.85})`;
-        sc.fillRect(W - 1, y, 1, 1);
+        const bin = Math.min(usable - 1, Math.floor(Math.pow(t, 1.7) * usable));
+        const m = (fft[bin] ?? 0) / 255;
+        const o = (y * W + (W - 1)) * 4;
+        data[o] = Math.floor(sec[0] + (pri[0] - sec[0]) * m);
+        data[o + 1] = Math.floor(sec[1] + (pri[1] - sec[1]) * m);
+        data[o + 2] = Math.floor(sec[2] + (pri[2] - sec[2]) * m);
+        data[o + 3] = Math.floor((0.15 + m * 0.85) * 255);
       }
     } else {
-      // No FFT — draw a thin idle stripe so the mode is recognizable.
-      sc.fillStyle = withAlpha(this.palette.secondary, 0.4);
-      sc.fillRect(W - 1, H / 2 - 1, 1, 2);
+      for (let y = 0; y < H; y++) {
+        const o = (y * W + (W - 1)) * 4;
+        const mid = y === Math.floor(H / 2) || y === Math.floor(H / 2) - 1;
+        data[o] = sec[0];
+        data[o + 1] = sec[1];
+        data[o + 2] = sec[2];
+        data[o + 3] = mid ? 102 : 0;
+      }
     }
-    g.drawImage(buf, 0, 0);
+    this.ctx.putImageData(this.spectroData, 0, 0);
   }
 
   // -------- mode: cover --------
@@ -657,17 +692,39 @@ export class Visualizer {
     if (!this.analysis) return false;
     const beats = this.analysis.beats;
     if (!beats.length) return false;
-    let i = this.lastBeatIndex;
-    if (i < 0) i = 0;
-    while (i < beats.length && beats[i].start <= positionSec) {
-      if (i !== this.lastBeatIndex) {
-        this.lastBeatIndex = i;
-        return true;
-      }
-      i++;
+
+    // Seeked backward past the last-fired beat — snap, don't flash.
+    if (this.lastBeatIndex >= 0 && positionSec + 0.05 < beats[this.lastBeatIndex].start) {
+      this.resyncBeatIndex(positionSec);
+      return false;
     }
-    this.lastBeatIndex = i - 1;
+
+    let i = this.lastBeatIndex + 1;
+    if (i < 0) i = 0;
+    // Seeked far forward: land on the current beat without detonating every
+    // skipped one as a ring/particle burst.
+    if (i < beats.length && positionSec - beats[i].start > 0.4) {
+      this.resyncBeatIndex(positionSec);
+      return false;
+    }
+
+    if (i < beats.length && beats[i].start <= positionSec) {
+      this.lastBeatIndex = i;
+      return true;
+    }
     return false;
+  }
+
+  /** Place lastBeatIndex on the last beat at-or-before now. Does not fire. */
+  private resyncBeatIndex(positionSec: number) {
+    if (!this.analysis?.beats.length) {
+      this.lastBeatIndex = -1;
+      return;
+    }
+    const beats = this.analysis.beats;
+    let i = 0;
+    while (i < beats.length && beats[i].start <= positionSec) i++;
+    this.lastBeatIndex = i - 1;
   }
 }
 
